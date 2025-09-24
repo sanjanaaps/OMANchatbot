@@ -15,22 +15,23 @@ from app_lib.search import search_documents, get_document_summary
 from app_lib.gemini import query_gemini, translate_text, get_department_focus, get_department_focus_arabic
 from app_lib.difflib_responses import get_difflib_response
 from app_lib.structured_analysis import generate_structured_summary, is_pdf_document
-# Import RAG integration with fallback
-try:
-    from app_lib.rag_integration import initialize_rag_system, get_rag_system, add_document_to_rag, query_rag
-    RAG_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"RAG integration not available: {str(e)}")
-    RAG_AVAILABLE = False
-    # Create dummy functions to prevent errors
-    def initialize_rag_system(*args, **kwargs):
-        return None
-    def get_rag_system():
-        return None
-    def add_document_to_rag(*args, **kwargs):
-        return False
-    def query_rag(*args, **kwargs):
-        return "RAG system not available", ""
+# RAG integration - conditionally loaded based on user choice
+RAG_ENABLED = False
+RAG_AVAILABLE = False
+rag_system = None
+
+# Dummy functions for when RAG is disabled
+def initialize_rag_system(*args, **kwargs):
+    return None
+
+def get_rag_system():
+    return None
+
+def add_document_to_rag(*args, **kwargs):
+    return False
+
+def query_rag(*args, **kwargs):
+    return "RAG system not available", ""
 from config import get_config
 import logging
 
@@ -50,42 +51,48 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize RAG system (completely optional - app will work without it)
-rag_system = None
-logger.info("Application starting - RAG system will be initialized in background if possible")
-
-def initialize_rag_background():
-    """Initialize RAG system in background - non-blocking"""
-    global rag_system
+# Initialize RAG based on user choice (set by startup_config.py)
+def initialize_rag_if_enabled():
+    """Initialize RAG system if it was enabled during startup"""
+    global RAG_ENABLED, RAG_AVAILABLE, rag_system
     
-    if not RAG_AVAILABLE:
-        logger.info("📝 RAG integration not available - skipping initialization")
-        return
-    
-    try:
-        logger.info("Attempting to initialize RAG system in background...")
-        rag_system = initialize_rag_system(app.config['UPLOAD_FOLDER'])
-        if rag_system and rag_system.is_ready():
-            logger.info("✅ RAG system initialized successfully with uploads folder")
-        else:
-            logger.warning("⚠️ RAG system initialized but not ready - continuing without RAG functionality")
-            rag_system = None
-    except Exception as e:
-        logger.warning(f"⚠️ RAG system initialization failed (non-critical): {str(e)}")
-        logger.info("📝 Application continues without RAG functionality")
-        rag_system = None
+    if RAG_ENABLED:
+        try:
+            from app_lib.rag_integration import initialize_rag_system as _init_rag, get_rag_system as _get_rag, add_document_to_rag as _add_doc, query_rag as _query_rag
+            
+            # Replace dummy functions with real ones
+            globals()['initialize_rag_system'] = _init_rag
+            globals()['get_rag_system'] = _get_rag
+            globals()['add_document_to_rag'] = _add_doc
+            globals()['query_rag'] = _query_rag
+            
+            RAG_AVAILABLE = True
+            logger.info("RAG integration enabled - initializing...")
+            
+            # Initialize RAG system
+            rag_system = initialize_rag_system(app.config['UPLOAD_FOLDER'])
+            if rag_system and rag_system.is_ready():
+                logger.info("✅ RAG system initialized successfully")
+            else:
+                logger.warning("⚠️ RAG system initialized but not ready")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize RAG system: {str(e)}")
+            RAG_AVAILABLE = False
+    else:
+        logger.info("📝 RAG functionality disabled - running without RAG")
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 @app.route('/')
 def index():
-    # Try to initialize RAG system on first request (non-blocking)
-    if rag_system is None:
+    # Initialize RAG on first request if enabled
+    if RAG_ENABLED and not RAG_AVAILABLE:
         try:
-            initialize_rag_background()
-        except:
-            pass  # Don't let RAG initialization break the app
+            initialize_rag_if_enabled()
+        except Exception as e:
+            logger.warning(f"RAG initialization failed: {str(e)}")
     
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
@@ -498,10 +505,16 @@ if __name__ == '__main__':
     print("="*60)
     print(f"📁 Upload folder: {app.config['UPLOAD_FOLDER']}")
     print(f"🔧 Debug mode: {app.debug}")
-    print(f"🌐 RAG available: {RAG_AVAILABLE}")
+    print(f"🤖 RAG enabled: {RAG_ENABLED}")
     print("="*60)
-    print("📝 Note: RAG system will initialize in background if available")
-    print("📝 Core app functionality works without RAG dependencies")
+    print("📝 Core app functionality: Document upload, search, and chat")
+    print("📝 AI features: Gemini integration, local search, translation")
+    if RAG_ENABLED:
+        print("🤖 RAG features: Advanced document-based Q&A")
     print("="*60 + "\n")
+    
+    # Initialize RAG if enabled
+    if RAG_ENABLED:
+        initialize_rag_if_enabled()
     
     app.run(debug=True, host='0.0.0.0', port=5000)
