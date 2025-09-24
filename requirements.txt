@@ -1,0 +1,45 @@
+# Flask Web Framework
+Flask==2.3.3
+Werkzeug==2.3.7
+
+# Database
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.23
+Flask-SQLAlchemy==3.0.5
+
+# Authentication & Security
+bcrypt==4.0.1
+
+# Document Processing
+PyPDF2==3.0.1
+pdfminer.six==20221105
+python-docx==0.8.11
+pytesseract==0.3.10
+Pillow==10.0.1
+
+# Text Processing & AI
+sumy==0.11.0
+scikit-learn==1.7.2
+nltk==3.8.1
+
+# HTTP Requests
+requests==2.31.0
+
+# Date/Time
+python-dateutil==2.8.2
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# Development & Testing
+pytest==7.4.2
+pytest-flask==1.2.0
+
+# Production Server (optional)
+gunicorn==21.2.0
+
+# Additional utilities
+click==8.1.7
+itsdangerous==2.1.2
+Jinja2==3.1.2
+MarkupSafe==2.1.3

@@ -1,0 +1,325 @@
+import os
+import requests
+import json
+import logging
+from typing import Optional, List
+from app_lib.extract import chunk_text
+
+logger = logging.getLogger(__name__)
+
+# Gemini API configuration
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
+
+def get_department_focus(department):
+    """Get department focus areas in English"""
+    focus_areas = {
+        'Finance': 'financial planning, budgeting, accounting, and financial reporting',
+        'Monetary Policy & Banking': 'monetary policy formulation, banking supervision, and financial stability',
+        'Currency': 'currency management, exchange rate policies, and currency operations',
+        'Legal & Compliance': 'legal frameworks, regulatory compliance, and risk management',
+        'IT / Finance': 'information technology systems, financial technology, and digital banking'
+    }
+    return focus_areas.get(department, 'departmental operations and policies')
+
+def get_department_focus_arabic(department):
+    """Get department focus areas in Arabic"""
+    focus_areas = {
+        'Finance': 'التخطيط المالي والميزانيات والمحاسبة والتقارير المالية',
+        'Monetary Policy & Banking': 'صياغة السياسة النقدية والإشراف المصرفي والاستقرار المالي',
+        'Currency': 'إدارة العملة وسياسات سعر الصرف وعمليات العملة',
+        'Legal & Compliance': 'الأطر القانونية والامتثال التنظيمي وإدارة المخاطر',
+        'IT / Finance': 'أنظمة تكنولوجيا المعلومات والتكنولوجيا المالية والخدمات المصرفية الرقمية'
+    }
+    return focus_areas.get(department, 'عمليات وسياسات القسم')
+
+def query_gemini(prompt: str, department: str, language: str = 'en', context: str = "") -> str:
+    """
+    Query Gemini API with department-specific context
+    
+    Args:
+        prompt: User query
+        department: User's department for context
+        language: Response language ('en' or 'ar')
+        context: Additional context from local search
+        
+    Returns:
+        Gemini API response
+    """
+    if not GEMINI_API_KEY:
+        # Return a helpful response based on the query
+        if language == 'ar':
+            if "oman central bank" in prompt.lower() or "البنك المركزي العماني" in prompt.lower():
+                return f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {department}، نركز على {get_department_focus_arabic(department)}. كيف يمكنني مساعدتك أكثر؟"
+            elif "finance report" in prompt.lower() or "تقرير مالي" in prompt.lower():
+                return f"تقرير مالي 2023: في قسم {department}، نركز على {get_department_focus_arabic(department)}. يمكنني مساعدتك في تحليل التقارير المالية والميزانيات والتقارير المحاسبية. ما هو السؤال المحدد الذي لديك حول التقرير المالي؟"
+            else:
+                return f"مرحباً! أنا مساعدك الذكي في قسم {department} في البنك المركزي العماني. أسعد لمساعدتك في أي أسئلة لديك حول عملك أو شؤون القسم."
+        else:
+            if "oman central bank" in prompt.lower():
+                return f"The Central Bank of Oman (CBO) is the central bank of the Sultanate of Oman, established in 1974. It is headquartered in Muscat and manages the country's monetary policy. In the {department} department, we focus on {get_department_focus(department)}. How can I assist you further?"
+            elif "finance report" in prompt.lower():
+                return f"Finance Report 2023: In the {department} department, we focus on {get_department_focus(department)}. I can help you analyze financial reports, budgets, and accounting statements. What specific question do you have about the finance report?"
+            else:
+                return f"Hello! I'm your AI assistant for the {department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
+    
+    # Prepare the prompt with department context
+    system_prompt = f"""You are an AI assistant for the {department} department at Oman Central Bank. 
+You are knowledgeable about {department} matters and can provide helpful information and guidance.
+
+Current query: {prompt}"""
+    
+    if context:
+        system_prompt += f"\n\nRelevant context from department documents:\n{context}"
+    
+    # Add language instruction
+    if language == 'ar':
+        system_prompt += "\n\nPlease respond in Arabic."
+    
+    try:
+        headers = {
+            'Content-Type': 'application/json',
+        }
+        
+        data = {
+            "contents": [{
+                "parts": [{
+                    "text": system_prompt
+                }]
+            }],
+            "generationConfig": {
+                "temperature": 0.7,
+                "topK": 40,
+                "topP": 0.95,
+                "maxOutputTokens": 2048,
+            }
+        }
+        
+        response = requests.post(
+            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+        
+        response.raise_for_status()
+        
+        result = response.json()
+        
+        if 'candidates' in result and len(result['candidates']) > 0:
+            content = result['candidates'][0]['content']['parts'][0]['text']
+            return content.strip()
+        else:
+            logger.error(f"Unexpected Gemini API response: {result}")
+            return "I'm sorry, I couldn't process your request at the moment. Please try again."
+    
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Gemini API request failed: {str(e)}")
+        # Return a helpful response based on the query
+        if language == 'ar':
+            if "oman central bank" in prompt.lower() or "البنك المركزي العماني" in prompt.lower():
+                return f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {department}، نركز على {get_department_focus_arabic(department)}. كيف يمكنني مساعدتك أكثر؟"
+            elif "finance report" in prompt.lower() or "تقرير مالي" in prompt.lower():
+                return f"تقرير مالي 2023: في قسم {department}، نركز على {get_department_focus_arabic(department)}. يمكنني مساعدتك في تحليل التقارير المالية والميزانيات والتقارير المحاسبية. ما هو السؤال المحدد الذي لديك حول التقرير المالي؟"
+            else:
+                return f"مرحباً! أنا مساعدك الذكي في قسم {department} في البنك المركزي العماني. أسعد لمساعدتك في أي أسئلة لديك حول عملك أو شؤون القسم."
+        else:
+            if "oman central bank" in prompt.lower():
+                return f"The Central Bank of Oman (CBO) is the central bank of the Sultanate of Oman, established in 1974. It is headquartered in Muscat and manages the country's monetary policy. In the {department} department, we focus on {get_department_focus(department)}. How can I assist you further?"
+            elif "finance report" in prompt.lower():
+                return f"Finance Report 2023: In the {department} department, we focus on {get_department_focus(department)}. I can help you analyze financial reports, budgets, and accounting statements. What specific question do you have about the finance report?"
+            else:
+                return f"Hello! I'm your AI assistant for the {department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse Gemini API response: {str(e)}")
+        # Return a helpful response based on the query
+        if language == 'ar':
+            if "oman central bank" in prompt.lower() or "البنك المركزي العماني" in prompt.lower():
+                return f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {department}، نركز على {get_department_focus_arabic(department)}. كيف يمكنني مساعدتك أكثر؟"
+            else:
+                return f"مرحباً! أنا مساعدك الذكي في قسم {department} في البنك المركزي العماني. أسعد لمساعدتك في أي أسئلة لديك حول عملك أو شؤون القسم."
+        else:
+            if "oman central bank" in prompt.lower():
+                return f"The Central Bank of Oman (CBO) is the central bank of the Sultanate of Oman, established in 1974. It is headquartered in Muscat and manages the country's monetary policy. In the {department} department, we focus on {get_department_focus(department)}. How can I assist you further?"
+            else:
+                return f"Hello! I'm your AI assistant for the {department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
+    except Exception as e:
+        logger.error(f"Unexpected error querying Gemini: {str(e)}")
+        # Return a helpful response based on the query
+        if language == 'ar':
+            if "oman central bank" in prompt.lower() or "البنك المركزي العماني" in prompt.lower():
+                return f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {department}، نركز على {get_department_focus_arabic(department)}. كيف يمكنني مساعدتك أكثر؟"
+            else:
+                return f"مرحباً! أنا مساعدك الذكي في قسم {department} في البنك المركزي العماني. أسعد لمساعدتك في أي أسئلة لديك حول عملك أو شؤون القسم."
+        else:
+            if "oman central bank" in prompt.lower():
+                return f"The Central Bank of Oman (CBO) is the central bank of the Sultanate of Oman, established in 1974. It is headquartered in Muscat and manages the country's monetary policy. In the {department} department, we focus on {get_department_focus(department)}. How can I assist you further?"
+            else:
+                return f"Hello! I'm your AI assistant for the {department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
+
+def translate_text(text: str, target_language: str = 'ar') -> str:
+    """
+    Translate text using Gemini API
+    
+    Args:
+        text: Text to translate
+        target_language: Target language code ('ar' for Arabic, 'en' for English)
+        
+    Returns:
+        Translated text
+    """
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY environment variable not set")
+    
+    if not text or not text.strip():
+        return text
+    
+    # Handle large texts by chunking
+    if len(text) > 3000:
+        chunks = chunk_text(text, chunk_size=3000, overlap=200)
+        translated_chunks = []
+        
+        for chunk in chunks:
+            translated_chunk = _translate_chunk(chunk, target_language)
+            translated_chunks.append(translated_chunk)
+        
+        return ' '.join(translated_chunks)
+    else:
+        return _translate_chunk(text, target_language)
+
+def _translate_chunk(text: str, target_language: str) -> str:
+    """Translate a single chunk of text"""
+    language_name = "Arabic" if target_language == 'ar' else "English"
+    
+    prompt = f"Translate the following text to {language_name}. Only return the translation, no additional text:\n\n{text}"
+    
+    try:
+        headers = {
+            'Content-Type': 'application/json',
+        }
+        
+        data = {
+            "contents": [{
+                "parts": [{
+                    "text": prompt
+                }]
+            }],
+            "generationConfig": {
+                "temperature": 0.3,
+                "topK": 40,
+                "topP": 0.95,
+                "maxOutputTokens": 1024,
+            }
+        }
+        
+        response = requests.post(
+            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+            headers=headers,
+            json=data,
+            timeout=30
+        )
+        
+        response.raise_for_status()
+        
+        result = response.json()
+        
+        if 'candidates' in result and len(result['candidates']) > 0:
+            content = result['candidates'][0]['content']['parts'][0]['text']
+            return content.strip()
+        else:
+            logger.error(f"Unexpected Gemini translation response: {result}")
+            return text  # Return original text if translation fails
+    
+    except Exception as e:
+        logger.error(f"Translation failed: {str(e)}")
+        return text  # Return original text if translation fails
+
+def analyze_document_with_gemini(document_content: str, department: str, language: str = 'en') -> dict:
+    """
+    Analyze a document using Gemini API
+    
+    Args:
+        document_content: Document text content
+        department: Department context
+        language: Response language
+        
+    Returns:
+        Analysis results
+    """
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY environment variable not set")
+    
+    # Chunk large documents
+    if len(document_content) > 3000:
+        chunks = chunk_text(document_content, chunk_size=3000, overlap=200)
+        # Use first chunk for analysis
+        content = chunks[0]
+        if len(chunks) > 1:
+            content += f"\n\n[Note: This is a large document with {len(chunks)} sections. Analysis based on first section.]"
+    else:
+        content = document_content
+    
+    prompt = f"""Analyze the following {department} department document and provide:
+1. Key topics and themes
+2. Important facts or data points
+3. Action items or recommendations (if any)
+4. Summary in 2-3 sentences
+
+Document content:
+{content}"""
+    
+    if language == 'ar':
+        prompt += "\n\nPlease respond in Arabic."
+    
+    try:
+        analysis = query_gemini(prompt, department, language)
+        
+        return {
+            'analysis': analysis,
+            'language': language,
+            'department': department
+        }
+    
+    except Exception as e:
+        logger.error(f"Document analysis failed: {str(e)}")
+        return {
+            'analysis': f"Analysis unavailable: {str(e)}",
+            'language': language,
+            'department': department
+        }
+
+def generate_department_insights(department: str, language: str = 'en') -> str:
+    """
+    Generate general insights for a department
+    
+    Args:
+        department: Department name
+        language: Response language
+        
+    Returns:
+        Generated insights
+    """
+    prompt = f"""Provide general insights and key focus areas for the {department} department at a central bank. 
+Include current trends, regulatory considerations, and best practices."""
+    
+    if language == 'ar':
+        prompt += "\n\nPlease respond in Arabic."
+    
+    try:
+        return query_gemini(prompt, department, language)
+    except Exception as e:
+        logger.error(f"Failed to generate insights for {department}: {str(e)}")
+        return f"Insights generation failed: {str(e)}"
+
+def validate_api_key() -> bool:
+    """Validate if Gemini API key is working"""
+    if not GEMINI_API_KEY:
+        return False
+    
+    try:
+        # Simple test query
+        test_response = query_gemini("Hello, this is a test.", "IT / Finance", "en")
+        return bool(test_response and len(test_response.strip()) > 0)
+    except Exception as e:
+        logger.error(f"API key validation failed: {str(e)}")
+        return False

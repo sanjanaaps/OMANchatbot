@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Oman Central Bank - Document Analyzer{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'ocb-blue': '#1e3a8a',
+                        'ocb-gold': '#f59e0b',
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-ocb-blue text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0">
+                        <h1 class="text-xl font-bold">
+                            <i class="fas fa-university mr-2"></i>
+                            Oman Central Bank
+                        </h1>
+                    </div>
+                    <div class="hidden md:ml-6 md:flex md:space-x-8">
+                        {% if session.user_id %}
+                        <a href="{{ url_for('dashboard') }}" class="text-white hover:text-ocb-gold px-3 py-2 rounded-md text-sm font-medium">
+                            <i class="fas fa-tachometer-alt mr-1"></i>Dashboard
+                        </a>
+                        <a href="{{ url_for('upload') }}" class="text-white hover:text-ocb-gold px-3 py-2 rounded-md text-sm font-medium">
+                            <i class="fas fa-upload mr-1"></i>Upload
+                        </a>
+                        <a href="{{ url_for('chat') }}" class="text-white hover:text-ocb-gold px-3 py-2 rounded-md text-sm font-medium">
+                            <i class="fas fa-comments mr-1"></i>Chat
+                        </a>
+                        <a href="{{ url_for('documents') }}" class="text-white hover:text-ocb-gold px-3 py-2 rounded-md text-sm font-medium">
+                            <i class="fas fa-file-alt mr-1"></i>Documents
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="flex items-center">
+                    {% if session.user_id %}
+                    <div class="flex items-center space-x-4">
+                        <span class="text-sm">
+                            <i class="fas fa-user mr-1"></i>
+                            {{ session.username }} ({{ session.department }})
+                        </span>
+                        <a href="{{ url_for('logout') }}" class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md text-sm font-medium">
+                            <i class="fas fa-sign-out-alt mr-1"></i>Logout
+                        </a>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }} mb-4 p-4 rounded-md {% if category == 'error' %}bg-red-100 border border-red-400 text-red-700{% elif category == 'success' %}bg-green-100 border border-green-400 text-green-700{% elif category == 'warning' %}bg-yellow-100 border border-yellow-400 text-yellow-700{% else %}bg-blue-100 border border-blue-400 text-blue-700{% endif %}">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        {% if category == 'error' %}
+                        <i class="fas fa-exclamation-circle"></i>
+                        {% elif category == 'success' %}
+                        <i class="fas fa-check-circle"></i>
+                        {% elif category == 'warning' %}
+                        <i class="fas fa-exclamation-triangle"></i>
+                        {% else %}
+                        <i class="fas fa-info-circle"></i>
+                        {% endif %}
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm">{{ message }}</p>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-white mt-auto">
+        <div class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
+            <div class="text-center text-sm">
+                <p>&copy; 2024 Oman Central Bank. All rights reserved.</p>
+                <p class="mt-1">Department-Secure Document Analyzer & Chatbot</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Language Toggle Script -->
+    <script>
+        function toggleLanguage() {
+            const currentLang = document.documentElement.lang;
+            const newLang = currentLang === 'en' ? 'ar' : 'en';
+            document.documentElement.lang = newLang;
+            document.documentElement.dir = newLang === 'ar' ? 'rtl' : 'ltr';
+            
+            // Update language toggle button
+            const toggleBtn = document.getElementById('lang-toggle');
+            if (toggleBtn) {
+                toggleBtn.textContent = newLang === 'en' ? 'العربية' : 'English';
+            }
+        }
+    </script>
+</body>
+</html>

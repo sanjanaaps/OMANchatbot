@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}AI Assistant Chat{% endblock %}
+
+{% block content %}
+<div class="px-4 py-6 sm:px-0">
+    <div class="max-w-4xl mx-auto">
+        <!-- Header -->
+        <div class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-900">
+                <i class="fas fa-comments text-ocb-blue mr-3"></i>
+                AI Assistant Chat
+            </h1>
+            <p class="mt-2 text-gray-600">
+                Chat with the AI assistant about your department's documents. The assistant can only access information from your department.
+            </p>
+        </div>
+
+        <!-- Chat Interface -->
+        <div class="bg-white shadow sm:rounded-lg">
+            <div class="px-4 py-5 sm:p-6">
+                <!-- Chat Messages -->
+                <div id="chatMessages" class="space-y-4 mb-6 max-h-96 overflow-y-auto border border-gray-200 rounded-lg p-4">
+                    {% if messages %}
+                        {% for message in messages %}
+                        <div class="flex {% if message.type == 'user' %}justify-end{% else %}justify-start{% endif %}">
+                            <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-lg {% if message.type == 'user' %}bg-ocb-blue text-white{% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {% if message.type == 'assistant' %}
+                                <div class="flex items-center mb-1">
+                                    <i class="fas fa-robot text-ocb-blue mr-2"></i>
+                                    <span class="text-xs font-medium">AI Assistant</span>
+                                </div>
+                                {% endif %}
+                                <p class="text-sm">{{ message.content|safe }}</p>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="text-center text-gray-500 py-8">
+                        <i class="fas fa-comments text-4xl mb-4"></i>
+                        <p>Start a conversation with the AI assistant</p>
+                        <p class="text-sm mt-2">Ask questions about your department's documents</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Chat Input Form -->
+                <form method="POST" class="space-y-4">
+                    <div class="flex items-center space-x-4">
+                        <div class="flex-1">
+                            <label for="message" class="sr-only">Message</label>
+                            <textarea name="message" id="message" rows="2" 
+                                      class="shadow-sm focus:ring-ocb-blue focus:border-ocb-blue block w-full sm:text-sm border-gray-300 rounded-md"
+                                      placeholder="Ask a question about your department's documents..."
+                                      required></textarea>
+                        </div>
+                        <div class="flex flex-col space-y-2">
+                            <select name="language" id="language" class="block w-32 pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-ocb-blue focus:border-ocb-blue sm:text-sm rounded-md">
+                                <option value="en">English</option>
+                                <option value="ar">العربية</option>
+                            </select>
+                            <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-ocb-blue hover:bg-blue-700">
+                                <i class="fas fa-paper-plane mr-2"></i>
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
