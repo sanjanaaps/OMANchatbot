@@ -15,6 +15,7 @@ from app_lib.search import search_documents, get_document_summary
 from app_lib.gemini import query_gemini, translate_text, get_department_focus, get_department_focus_arabic
 from app_lib.difflib_responses import get_difflib_response
 from app_lib.structured_analysis import generate_structured_summary, is_pdf_document
+from app_lib.voice_service import VoiceRecordingService
 # RAG integration - conditionally loaded based on user choice
 RAG_ENABLED = False
 RAG_AVAILABLE = False
@@ -33,6 +34,7 @@ def add_document_to_rag(*args, **kwargs):
 def query_rag(*args, **kwargs):
     return "RAG system not available", ""
 from config import get_config
+from app_lib.whisper_service import WhisperService, is_gpu_available
 import logging
 
 app = Flask(__name__)
@@ -50,6 +52,23 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize Whisper at startup (ignore UI/testing integrations)
+WHISPER_SERVICE = None
+try:
+    gpu = is_gpu_available()
+    logger.info(f"GPU available for Whisper: {gpu}")
+    t0 = None
+    import time as _time
+    t0 = _time.perf_counter()
+    WHISPER_SERVICE = WhisperService(app.config['UPLOAD_FOLDER'], model_name='base')
+    t1 = _time.perf_counter()
+    logger.info(f"Whisper initialized in {t1 - t0:.2f}s; device: {WHISPER_SERVICE.device}")
+except Exception as e:
+    logger.warning(f"Whisper initialization failed: {e}")
+
+# Voice recording service (singleton)
+voice_service = VoiceRecordingService()
 
 # Initialize RAG based on user choice (set by startup_config.py)
 def initialize_rag_if_enabled():
@@ -411,7 +430,7 @@ def rag_init():
                 'message': 'RAG integration not available - install required packages'
             }), 400
         
-        initialize_rag_background()
+        # initialize_rag_background()  # removed: not defined; manual init via /rag/init if needed
         
         if rag_system and rag_system.is_ready():
             return jsonify({
@@ -498,6 +517,98 @@ def format_local_response(results):
         response += f"   {result['excerpt'][:200]}...\n\n"
     
     return response
+
+# ---------------- Voice Recording API ----------------
+@app.route('/voice/start', methods=['POST'])
+@login_required
+def voice_start():
+    session_id = voice_service.begin_session(user_id=str(session['user_id']))
+    return jsonify({'session_id': session_id})
+
+
+@app.route('/voice/chunk', methods=['POST'])
+@login_required
+def voice_chunk():
+    session_id = request.form.get('session_id')
+    sample_rate = request.form.get('sample_rate_hz', type=int)
+    blob = request.files.get('audio')
+    if not session_id or not blob:
+        return jsonify({'error': 'session_id and audio required'}), 400
+    try:
+        voice_service.accept_audio_chunk(session_id, blob.read(), sample_rate_hz=sample_rate)
+        return jsonify({'ok': True})
+    except Exception as e:
+        logger.error(f"voice_chunk error: {e}")
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/voice/transcript', methods=['GET'])
+@login_required
+def voice_transcript():
+    session_id = request.args.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'session_id required'}), 400
+    try:
+        transcript = voice_service.get_live_transcript(session_id)
+        return jsonify({'transcript': transcript})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/voice/waveform', methods=['GET'])
+@login_required
+def voice_waveform():
+    session_id = request.args.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'session_id required'}), 400
+    try:
+        points = voice_service.get_waveform_points(session_id, max_points=200)
+        return jsonify({'points': points})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/voice/finalize', methods=['POST'])
+@login_required
+def voice_finalize():
+    data = request.get_json(silent=True) or {}
+    session_id = data.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'session_id required'}), 400
+    try:
+        # Finalize and then try to run Whisper on best-effort audio
+        meta = voice_service.finalize_session(session_id)
+        audio_bytes = b""
+        try:
+            audio_bytes = voice_service.get_best_effort_audio(session_id)
+        except Exception:
+            audio_bytes = b""
+        if audio_bytes and 'WHISPER_SERVICE' in globals() and WHISPER_SERVICE is not None:
+            try:
+                result = WHISPER_SERVICE.transcribe_bytes(audio_bytes, file_suffix='.webm')
+                meta['transcript'] = result.get('text', '') or meta.get('transcript', '')
+                meta['whisper_language'] = result.get('language', '')
+                meta['whisper_load_time_s'] = result.get('load_time_s', '')
+                meta['whisper_infer_time_s'] = result.get('infer_time_s', '')
+            except Exception as e:
+                logger.warning(f"Whisper transcription failed: {e}")
+        return jsonify(meta)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/voice/cancel', methods=['POST'])
+@login_required
+def voice_cancel():
+    data = request.get_json(silent=True) or {}
+    session_id = data.get('session_id')
+    if not session_id:
+        return jsonify({'error': 'session_id required'}), 400
+    try:
+        voice_service.cancel_session(session_id)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 if __name__ == '__main__':
     print("\n" + "="*60)
