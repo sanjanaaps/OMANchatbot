@@ -1,5 +1,0 @@
-torch>=2.0.0
-git+https://github.com/openai/whisper.git
-soundfile>=0.12.1
-ffmpeg-python>=0.2.0
-

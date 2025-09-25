@@ -140,7 +140,10 @@ def get_llm():
         
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        device = 0 if torch.cuda.is_available() else -1  # GPU if available
+        
+        # Use startup device check
+        import os
+        device = 0 if os.environ.get('WHISPER_DEVICE', 'cpu') == 'cuda' else -1
         
         pipe = pipeline(
             "text2text-generation", 
@@ -194,10 +197,14 @@ class OmanCBRAG:
         try:
             # Initialize embeddings
             logger.info("Initializing embeddings...")
+            import os
+            device = os.environ.get('WHISPER_DEVICE', 'cpu')
+            
             self.embeddings = HuggingFaceEmbeddings(
-                model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+                model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+                model_kwargs={'device': device}
             )
-            logger.info("Embeddings initialized successfully")
+            logger.info(f"Embeddings initialized successfully on {device}")
             
             # Initialize LLM
             self.llm = get_llm()

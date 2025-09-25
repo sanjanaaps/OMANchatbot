@@ -18,16 +18,20 @@ import time
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
+import shutil
 
 logger = logging.getLogger(__name__)
 
 
 def is_gpu_available() -> bool:
-    try:
-        import torch  # type: ignore
-        return bool(getattr(torch, "cuda", None) and torch.cuda.is_available())
-    except Exception:
-        return False
+    """Check if GPU is available (uses startup device check)"""
+    import os
+    return os.environ.get('WHISPER_DEVICE', 'cpu') == 'cuda'
+
+
+def is_ffmpeg_available() -> bool:
+    """Check if ffmpeg is available on PATH (required by Whisper)."""
+    return shutil.which("ffmpeg") is not None
 
 
 class WhisperService:
@@ -41,10 +45,17 @@ class WhisperService:
         load_on_init: bool = True,
     ) -> None:
         self.uploads_dir: Path = Path(uploads_dir)
-        self.model_name: str = model_name
-        self.device: str = device or ("cuda" if is_gpu_available() else "cpu")
+        
+        # Use startup device check instead of redundant GPU detection
+        import os
+        self.device: str = device or os.environ.get('WHISPER_DEVICE', 'cpu')
+        self.model_name: str = model_name or os.environ.get('WHISPER_MODEL', 'base')
         self._model = None  # lazy-loaded whisper model
         self._banking_knowledge: str = ""
+
+        # Concise console summary
+        ffmpeg_available = is_ffmpeg_available()
+        print(f"[Service] device={self.device}, ffmpeg={int(ffmpeg_available)}, model={self.model_name}")
 
         # Preload knowledge and (optionally) the model
         self._load_banking_knowledge()
@@ -94,6 +105,11 @@ class WhisperService:
         if not audio_bytes:
             return {"text": "", "language": "", "duration_s": "0", "load_time_s": "0", "infer_time_s": "0"}
 
+        # Check if FFmpeg is available, if not try fallback processor
+        if not is_ffmpeg_available():
+            logger.warning("FFmpeg not available, attempting fallback audio processing")
+            return self._transcribe_with_fallback(audio_bytes, file_suffix)
+
         # Ensure model is loaded
         t_load0 = time.perf_counter()
         self._lazy_load_model()
@@ -101,7 +117,9 @@ class WhisperService:
 
         # Write to a temporary file for whisper
         import tempfile
-        with tempfile.NamedTemporaryFile(suffix=file_suffix, delete=True) as tmp:
+        # Normalize suffix to common extensions Whisper/ffmpeg can handle
+        safe_suffix = file_suffix if file_suffix in ('.webm', '.ogg', '.wav', '.mp3', '.m4a') else '.webm'
+        with tempfile.NamedTemporaryFile(suffix=safe_suffix, delete=True) as tmp:
             tmp.write(audio_bytes)
             tmp.flush()
 
@@ -114,12 +132,29 @@ class WhisperService:
                 )
 
             t0 = time.perf_counter()
-            # Some Whisper forks expose .transcribe with initial_prompt
-            try:
-                result = self._model.transcribe(tmp.name, initial_prompt=initial_prompt)
-            except TypeError:
-                # Fallback without prompt if not supported
-                result = self._model.transcribe(tmp.name)
+            # Limit language to English or Arabic to speed up inference
+            forced_language = self._detect_language_limited(tmp.name)
+
+            # If ffmpeg is unavailable but we received WAV, decode without ffmpeg
+            if not is_ffmpeg_available() and safe_suffix == '.wav':
+                result = self._transcribe_wav_bytes_without_ffmpeg(audio_bytes, forced_language, initial_prompt)
+            else:
+                # Some Whisper forks expose .transcribe with initial_prompt
+                try:
+                    if forced_language:
+                        result = self._model.transcribe(
+                            tmp.name,
+                            language=forced_language,
+                            initial_prompt=initial_prompt,
+                        )
+                    else:
+                        result = self._model.transcribe(tmp.name, initial_prompt=initial_prompt)
+                except TypeError:
+                    # Fallback without prompt if not supported
+                    if forced_language:
+                        result = self._model.transcribe(tmp.name, language=forced_language)
+                    else:
+                        result = self._model.transcribe(tmp.name)
             infer_time = time.perf_counter() - t0
 
         text = (result.get("text") or "").strip()
@@ -133,7 +168,122 @@ class WhisperService:
             "infer_time_s": f"{infer_time:.2f}",
         }
 
+    def _transcribe_with_fallback(self, audio_bytes: bytes, file_suffix: str) -> Dict[str, str]:
+        """Transcribe using fallback audio processor when FFmpeg is not available"""
+        logger.info("Attempting transcription with fallback audio processor")
+        try:
+            # Import and use the fallback processor
+            from server_audio_processor import WhisperAudioHandler
+            
+            handler = WhisperAudioHandler()
+            if not handler.whisper_available:
+                logger.error("Fallback processor: Whisper not available")
+                return {"text": "", "language": "", "duration_s": "0", "load_time_s": "0", "infer_time_s": "0"}
+            
+            # Determine format hint
+            format_hint = file_suffix.lstrip('.') if file_suffix.startswith('.') else file_suffix
+            
+            # Transcribe using fallback processor
+            result = handler.transcribe_audio_bytes(audio_bytes, format_hint)
+            
+            if result.get('success'):
+                processing_info = result.get('processing_info', {})
+                return {
+                    "text": result.get('text', ''),
+                    "language": result.get('language', ''),
+                    "duration_s": str(processing_info.get('duration', '')),
+                    "load_time_s": "0",  # Fallback doesn't track load time separately
+                    "infer_time_s": "0",  # Fallback doesn't track inference time separately
+                }
+            else:
+                logger.error(f"Fallback transcription failed: {result.get('error', 'Unknown error')}")
+                return {"text": "", "language": "", "duration_s": "0", "load_time_s": "0", "infer_time_s": "0"}
+                
+        except ImportError:
+            logger.error("Fallback audio processor not available")
+            return {"text": "", "language": "", "duration_s": "0", "load_time_s": "0", "infer_time_s": "0"}
+        except Exception as e:
+            logger.error(f"Fallback transcription error: {e}")
+            return {"text": "", "language": "", "duration_s": "0", "load_time_s": "0", "infer_time_s": "0"}
 
-__all__ = ["WhisperService", "is_gpu_available"]
+    # ------- Internal helpers -------
+    def _transcribe_wav_bytes_without_ffmpeg(self, wav_bytes: bytes, forced_language: Optional[str], initial_prompt: Optional[str]) -> Dict[str, str]:
+        """Decode WAV bytes without ffmpeg and run Whisper directly.
+
+        This path avoids ffmpeg by using soundfile and a simple resampler.
+        """
+        import io
+        try:
+            import soundfile as sf  # type: ignore
+            import numpy as np  # type: ignore
+            import whisper  # type: ignore
+        except Exception as e:
+            raise RuntimeError(f"WAV decode path unavailable: {e}")
+
+        data, sr = sf.read(io.BytesIO(wav_bytes), dtype='float32', always_2d=False)
+        if data.ndim > 1:
+            # Convert to mono by averaging channels
+            data = data.mean(axis=1)
+        # Resample to 16000 Hz if needed
+        target_sr = 16000
+        if sr != target_sr:
+            x_old = np.linspace(0, 1, num=len(data), endpoint=False, dtype=np.float32)
+            x_new = np.linspace(0, 1, num=int(len(data) * (target_sr / sr)), endpoint=False, dtype=np.float32)
+            data = np.interp(x_new, x_old, data).astype(np.float32)
+
+        audio = whisper.pad_or_trim(data)
+        mel = whisper.log_mel_spectrogram(audio).to(self._model.device)
+        # Build decoding options
+        try:
+            from whisper.decoding import DecodingOptions, decode  # type: ignore
+        except Exception:
+            # Fallback older API
+            DecodingOptions = None
+            decode = None
+
+        if DecodingOptions and decode:
+            opts = DecodingOptions(language=forced_language or None, prompt=initial_prompt or None)
+            dec = decode(self._model, mel, opts)
+            text = getattr(dec, 'text', '') or ''
+        else:
+            # Very old fallback: use model.decode
+            opts = { 'language': forced_language } if forced_language else {}
+            dec = self._model.decode(mel, opts)  # type: ignore
+            text = getattr(dec, 'text', '') or ''
+
+        return {
+            'text': text,
+            'language': forced_language or '',
+            'duration': '',
+        }
+    def _detect_language_limited(self, audio_path: str) -> Optional[str]:
+        """Detect language but restrict to English or Arabic for speed.
+
+        Returns 'en' or 'ar' if confidently detected, otherwise None.
+        """
+        try:
+            import whisper  # type: ignore
+            import numpy as np  # type: ignore
+        except Exception as e:
+            logger.debug(f"Language detect deps missing: {e}")
+            return None
+
+        try:
+            audio = whisper.load_audio(audio_path)
+            audio = whisper.pad_or_trim(audio)
+            mel = whisper.log_mel_spectrogram(audio).to(self._model.device)
+            _, probs = self._model.detect_language(mel)
+            # Consider only English and Arabic
+            en_p = float(probs.get('en', 0.0))
+            ar_p = float(probs.get('ar', 0.0))
+            if en_p == 0.0 and ar_p == 0.0:
+                return None
+            return 'en' if en_p >= ar_p else 'ar'
+        except Exception as e:
+            logger.debug(f"Limited language detect failed: {e}")
+            return None
+
+
+__all__ = ["WhisperService", "is_gpu_available", "is_ffmpeg_available"]
 
 

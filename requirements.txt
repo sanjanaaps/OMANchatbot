@@ -1,3 +1,16 @@
+# Canonical dependency list for this project
+# ------------------------------------------------------------
+# This single requirements.txt replaces requirements_whisper.txt
+# and requirements_rag.txt. All runtime deps are consolidated here.
+#
+# Sections:
+# - Web/API/Core
+# - Data/ML/RAG
+# - Audio/Whisper (fallback-friendly)
+# - Tooling/Dev
+# ------------------------------------------------------------
+
+# Web/API/Core
 aiofiles==24.1.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.12.15
@@ -145,3 +158,16 @@ websockets==15.0.1
 Werkzeug==2.3.7
 yarl==1.20.1
 zstandard==0.25.0
+
+# ------------------------------------------------------------
+# Audio/Whisper (fallback-friendly)
+#   - Uses openai-whisper (PyPI) which provides the 'whisper' module
+#   - soundfile + librosa/scipy/pydub improve non-ffmpeg decoding
+#   - ffmpeg is optional; fallback paths work without it
+# ------------------------------------------------------------
+openai-whisper
+soundfile
+librosa
+
+# Optional (uncomment if you want programmatic ffmpeg access)
+# ffmpeg-python>=0.2.0

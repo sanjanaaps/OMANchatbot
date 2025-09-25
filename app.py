@@ -34,7 +34,7 @@ def add_document_to_rag(*args, **kwargs):
 def query_rag(*args, **kwargs):
     return "RAG system not available", ""
 from config import get_config
-from app_lib.whisper_service import WhisperService, is_gpu_available
+from app_lib.whisper_service import WhisperService, is_gpu_available, is_ffmpeg_available
 import logging
 
 app = Flask(__name__)
@@ -57,7 +57,8 @@ logger = logging.getLogger(__name__)
 WHISPER_SERVICE = None
 try:
     gpu = is_gpu_available()
-    logger.info(f"GPU available for Whisper: {gpu}")
+    ffmpeg = is_ffmpeg_available()
+    logger.info(f"GPU available for Whisper: {gpu}; ffmpeg available: {ffmpeg}")
     t0 = None
     import time as _time
     t0 = _time.perf_counter()
@@ -576,13 +577,14 @@ def voice_finalize():
     if not session_id:
         return jsonify({'error': 'session_id required'}), 400
     try:
-        # Finalize and then try to run Whisper on best-effort audio
-        meta = voice_service.finalize_session(session_id)
-        audio_bytes = b""
+        # IMPORTANT: capture audio BEFORE finalizing (finalize closes/removes session)
         try:
             audio_bytes = voice_service.get_best_effort_audio(session_id)
         except Exception:
             audio_bytes = b""
+
+        # Now finalize to flush metadata and clean up
+        meta = voice_service.finalize_session(session_id)
         if audio_bytes and 'WHISPER_SERVICE' in globals() and WHISPER_SERVICE is not None:
             try:
                 result = WHISPER_SERVICE.transcribe_bytes(audio_bytes, file_suffix='.webm')
@@ -590,11 +592,61 @@ def voice_finalize():
                 meta['whisper_language'] = result.get('language', '')
                 meta['whisper_load_time_s'] = result.get('load_time_s', '')
                 meta['whisper_infer_time_s'] = result.get('infer_time_s', '')
+                # Log transcript and performance
+                _t = meta.get('transcript', '')
+                _preview = (_t[:200] + '...') if len(_t) > 200 else _t
+                logger.info(f"Whisper transcript ({len(_t)} chars): {_preview}")
+                logger.info(
+                    f"Whisper perf load={meta.get('whisper_load_time_s','')}s infer={meta.get('whisper_infer_time_s','')}s lang={meta.get('whisper_language','')}"
+                )
+                meta['whisper_used'] = True
             except Exception as e:
                 logger.warning(f"Whisper transcription failed: {e}")
+                meta['whisper_used'] = False
+        else:
+            meta['whisper_used'] = False
+            meta['whisper_reason'] = 'no_audio_bytes' if not audio_bytes else 'service_unavailable'
         return jsonify(meta)
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+
+@app.route('/voice/transcribe', methods=['POST'])
+@login_required
+def voice_transcribe_full():
+    """Accept a full audio blob and run Whisper once, no chunking."""
+    blob = request.files.get('audio')
+    sample_rate = request.form.get('sample_rate_hz', type=int)
+    if not blob:
+        return jsonify({'error': 'audio file required'}), 400
+    audio_bytes = blob.read()
+    resp = {
+        'whisper_used': False,
+        'transcript': '',
+        'whisper_language': '',
+        'whisper_load_time_s': '',
+        'whisper_infer_time_s': '',
+    }
+    try:
+        if 'WHISPER_SERVICE' in globals() and WHISPER_SERVICE is not None:
+            # Infer file suffix from filename
+            filename = getattr(blob, 'filename', '') or 'audio.webm'
+            suffix = '.' + filename.split('.')[-1].lower() if '.' in filename else '.webm'
+            result = WHISPER_SERVICE.transcribe_bytes(audio_bytes, file_suffix=suffix)
+            resp['transcript'] = result.get('text', '')
+            resp['whisper_language'] = result.get('language', '')
+            resp['whisper_load_time_s'] = result.get('load_time_s', '')
+            resp['whisper_infer_time_s'] = result.get('infer_time_s', '')
+            resp['whisper_used'] = True
+            _t = resp['transcript']
+            _preview = (_t[:200] + '...') if len(_t) > 200 else _t
+            logger.info(f"Whisper transcript (full upload, {len(_t)} chars): {_preview}")
+        else:
+            resp['whisper_reason'] = 'service_unavailable'
+    except Exception as e:
+        logger.warning(f"Whisper full transcription failed: {e}")
+        resp['whisper_reason'] = str(e)
+    return jsonify(resp)
 
 
 @app.route('/voice/cancel', methods=['POST'])

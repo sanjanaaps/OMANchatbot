@@ -101,6 +101,8 @@
 {% endblock %}
 
 {% block scripts %}
+<!-- Include browser audio processor as fallback -->
+<script src="{{ url_for('static', filename='browser_audio_processor.js') }}"></script>
 <script>
 (function() {
     'use strict';
@@ -114,10 +116,31 @@
     const canvas = document.getElementById('waveformCanvas');
     const transcriptEl = document.getElementById('liveTranscript');
     const messageTextarea = document.getElementById('message');
+    
+    // Initialize fallback audio processor
+    let fallbackProcessor = null;
+    let whisperHandler = null;
+    
+    try {
+        if (window.AudioProcessor && window.WhisperAudioHandler) {
+            fallbackProcessor = new window.AudioProcessor();
+            whisperHandler = new window.WhisperAudioHandler();
+            console.log('[voice] Fallback audio processor initialized');
+        } else {
+            console.warn('[voice] Fallback audio processor not available');
+        }
+    } catch (error) {
+        console.error('[voice] Failed to initialize fallback audio processor:', error);
+    }
+
+    // Expose a safe default for onclick even if initialization fails early
+    window.toggleRecording = async function() {
+        console.warn('[voice] toggleRecording called before initialization');
+    };
 
     if (!recordBtn || !recordTimer || !canvas || !transcriptEl) {
-        console.error('Required elements not found');
-        return;
+        console.error('[voice] Required elements not found');
+        return; // leave the noop toggleRecording in place
     }
 
     const canvasCtx = canvas.getContext('2d');
@@ -156,15 +179,17 @@
     function resizeCanvas() {
         const rect = canvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
+        console.log('[voice] resizeCanvas rect.width=', rect.width, 'dpr=', dpr);
         
-        // Set actual canvas size
-        canvas.width = Math.max(600, rect.width * dpr);
-        canvas.height = 64 * dpr;
+        // Set actual canvas pixel size
+        canvas.width = Math.max(600, Math.floor(rect.width * dpr));
+        canvas.height = Math.floor(64 * dpr);
         
-        // Scale the drawing context
+        // Reset and scale the drawing context (avoid cumulative scaling)
+        canvasCtx.setTransform(1, 0, 0, 1, 0, 0);
         canvasCtx.scale(dpr, dpr);
         
-        // Set display size
+        // CSS display size
         canvas.style.width = rect.width + 'px';
         canvas.style.height = '64px';
         
@@ -207,7 +232,7 @@
 
             rafId = requestAnimationFrame(drawWaveform);
         } catch (error) {
-            console.error('Waveform drawing error:', error);
+            console.error('[voice] Waveform drawing error:', error);
         }
     }
 
@@ -235,6 +260,7 @@
         try {
             recordBtn.disabled = true;
             recordingStatus.textContent = 'Starting...';
+            console.log('[voice] startRecording invoked');
             
             // Check browser support
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -247,9 +273,10 @@
                 if (res.ok) {
                     const data = await res.json();
                     voiceSessionId = data.session_id;
+                    console.log('[voice] session started, id=', voiceSessionId);
                 }
             } catch (error) {
-                console.log('Voice session not available, recording locally only');
+                console.log('[voice] session start not available, proceeding locally:', error);
             }
 
             // Get microphone access
@@ -260,12 +287,14 @@
                     autoGainControl: true
                 }
             });
+            console.log('[voice] getUserMedia acquired');
 
             // Create audio context for visualization
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             
             if (audioContext.state === 'suspended') {
                 await audioContext.resume();
+                console.log('[voice] audioContext resumed');
             }
 
             analyser = audioContext.createAnalyser();
@@ -273,8 +302,10 @@
             source.connect(analyser);
             
             analyser.fftSize = 2048;
-            bufferLength = analyser.frequencyBinCount;
+            // Use fftSize for time-domain buffer length
+            bufferLength = analyser.fftSize;
             dataArray = new Uint8Array(bufferLength);
+            console.log('[voice] analyser configured, bufferLength=', bufferLength);
 
             // Setup media recorder
             const options = {};
@@ -284,29 +315,28 @@
                 options.mimeType = 'audio/webm';
             }
 
-            mediaRecorder = new MediaRecorder(mediaStream, options);
+            // Ensure a supported MIME type; handle Edge/Firefox variations
+            try {
+                mediaRecorder = new MediaRecorder(mediaStream, options);
+            } catch (e) {
+                console.warn('[voice] MediaRecorder init failed with options, retrying without:', e);
+                mediaRecorder = new MediaRecorder(mediaStream);
+            }
             recordedChunks = [];
 
-            mediaRecorder.ondataavailable = async (event) => {
+            mediaRecorder.ondataavailable = (event) => {
                 if (event.data && event.data.size > 0) {
                     recordedChunks.push(event.data);
-                    
-                    // Send to server if session available
-                    if (voiceSessionId) {
-                        try {
-                            const formData = new FormData();
-                            formData.append('session_id', voiceSessionId);
-                            formData.append('sample_rate_hz', String(audioContext.sampleRate));
-                            formData.append('audio', event.data, 'chunk.webm');
-                            await fetch('/voice/chunk', { method: 'POST', body: formData });
-                        } catch (error) {
-                            console.error('Failed to send audio chunk:', error);
-                        }
-                    }
+                    console.log('[voice] chunk size=', event.data.size);
                 }
             };
+            mediaRecorder.onerror = (e) => console.error('[voice] MediaRecorder error:', e);
+            mediaRecorder.onstart = () => console.log('[voice] MediaRecorder started');
+            mediaRecorder.onstop = () => console.log('[voice] MediaRecorder stopped');
 
-            mediaRecorder.start(250); // Record in 250ms chunks
+            // Collect data and upload once on stop
+            mediaRecorder.start();
+            console.log('[voice] mediaRecorder.start called');
 
             // Start recording state
             isRecording = true;
@@ -323,6 +353,7 @@
                 recordTimer.textContent = formatTime(elapsed);
                 
                 if (elapsed >= 60000) {
+                    console.log('[voice] auto stop at 60s');
                     await stopRecording();
                 }
             }, 100);
@@ -330,7 +361,7 @@
             recordBtn.disabled = false;
 
         } catch (error) {
-            console.error('Failed to start recording:', error);
+            console.error('[voice] Failed to start recording:', error);
             recordingStatus.textContent = `Error: ${error.message}`;
             recordingStatus.classList.add('text-red-600');
             
@@ -346,6 +377,7 @@
         isRecording = false;
         updateButtonState(false);
         recordingStatus.textContent = 'Processing...';
+        console.log('[voice] stopRecording invoked');
 
         try {
             // Stop media recorder
@@ -356,33 +388,100 @@
                 });
             }
 
-            await cleanup();
-
-            // Get final transcript from server
-            if (voiceSessionId) {
+            // Upload full recording and get transcript in one request (before cleanup)
+            try {
+                if (!recordedChunks || recordedChunks.length === 0) {
+                    throw new Error('no audio captured');
+                }
+                
+                // Try primary transcription method first
+                let transcriptionSuccess = false;
                 try {
-                    const response = await fetch('/voice/finalize', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ session_id: voiceSessionId })
-                    });
-                    
+                    // Prefer WAV when ffmpeg is unavailable on server
+                    let chosenMime = (mediaRecorder && mediaRecorder.mimeType) ? mediaRecorder.mimeType : '';
+                    let ext = 'webm';
+                    if (chosenMime.includes('wav')) {
+                        ext = 'wav';
+                    } else if (chosenMime.includes('webm')) {
+                        ext = 'webm';
+                    } else if (chosenMime.includes('ogg')) {
+                        ext = 'ogg';
+                    }
+                    // If server lacks ffmpeg, WAV is safest; attempt to convert
+                    // Some browsers do not support WAV via MediaRecorder; if not, keep chosenMime
+                    if (!chosenMime) {
+                        chosenMime = 'audio/webm';
+                    }
+                    // Convert to WAV in-browser to avoid server ffmpeg/librosa issues
+                    const originalBlob = new Blob(recordedChunks, { type: chosenMime });
+                    let wavBuffer = null;
+                    if (fallbackProcessor) {
+                        try {
+                            const conv = await fallbackProcessor.blobToWhisperFormat(originalBlob);
+                            if (conv && conv.success && conv.audioData) {
+                                wavBuffer = conv.audioData;
+                                ext = 'wav';
+                                chosenMime = 'audio/wav';
+                                console.log('[voice] Converted recording to WAV in-browser');
+                            }
+                        } catch (ce) {
+                            console.warn('[voice] In-browser WAV conversion failed, sending original blob', ce);
+                        }
+                    }
+
+                    const uploadBlob = wavBuffer ? new Blob([wavBuffer], { type: 'audio/wav' }) : originalBlob;
+                    const sr = audioContext ? audioContext.sampleRate : '';
+                    const formData = new FormData();
+                    formData.append('sample_rate_hz', String(sr));
+                    formData.append('audio', uploadBlob, `recording.${ext}`);
+                    const response = await fetch('/voice/transcribe', { method: 'POST', body: formData });
                     if (response.ok) {
                         const result = await response.json();
                         if (result.transcript) {
                             transcriptEl.value = result.transcript;
-                            // Also populate the message textarea
                             messageTextarea.value = result.transcript;
+                            console.log('[voice] Primary transcription successful:', result.transcript);
+                            transcriptionSuccess = true;
+                        } else {
+                            console.log('[voice] Primary transcription empty; details:', result);
                         }
+                    } else {
+                        console.error('[voice] Primary /voice/transcribe HTTP error', response.status);
                     }
-                } catch (error) {
-                    console.error('Failed to get transcript:', error);
+                } catch (primaryError) {
+                    console.error('[voice] Primary transcription failed:', primaryError);
                 }
-                voiceSessionId = null;
-            } else {
-                // Fallback: show that recording was captured
-                transcriptEl.value = 'Recording completed (server transcription not available)';
+                
+                // Fallback to browser audio processor if primary method failed
+                if (!transcriptionSuccess && fallbackProcessor && whisperHandler) {
+                    try {
+                        console.log('[voice] Attempting fallback transcription with browser processor');
+                        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+                        const result = await whisperHandler.processRecordedAudio(blob);
+                        if (result.success && result.transcript) {
+                            transcriptEl.value = result.transcript;
+                            messageTextarea.value = result.transcript;
+                            console.log('[voice] Fallback transcription successful:', result.transcript);
+                            transcriptionSuccess = true;
+                        } else {
+                            console.error('[voice] Fallback transcription failed:', result.error);
+                        }
+                    } catch (fallbackError) {
+                        console.error('[voice] Fallback transcription error:', fallbackError);
+                    }
+                }
+                
+                if (!transcriptionSuccess) {
+                    console.warn('[voice] All transcription methods failed');
+                    recordingStatus.textContent = 'Transcription failed - please try again';
+                }
+                
+            } catch (err) {
+                console.error('[voice] Audio processing error:', err);
+                recordingStatus.textContent = 'Audio processing failed';
             }
+
+            await cleanup();
 
             recordingStatus.textContent = 'Complete';
             setTimeout(() => {
@@ -419,7 +518,7 @@
             try {
                 await audioContext.close();
             } catch (error) {
-                console.error('Error closing audio context:', error);
+                console.error('[voice] Error closing audio context:', error);
             }
             audioContext = null;
         }
@@ -435,7 +534,7 @@
         mediaRecorder = null;
     }
 
-    // Global function for button click
+    // Global function for button click (override safe default once ready)
     window.toggleRecording = async function() {
         if (isRecording) {
             await stopRecording();

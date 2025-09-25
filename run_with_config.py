@@ -7,6 +7,23 @@ Handles RAG enable/disable choice before starting the app
 import sys
 import os
 
+def _startup_device_check() -> None:
+    try:
+        import torch  # type: ignore
+        has_cuda = bool(getattr(torch, 'cuda', None) and torch.cuda.is_available())
+    except Exception:
+        has_cuda = False
+
+    whisper_device = 'cuda' if has_cuda else 'cpu'
+    whisper_model = 'small' if has_cuda else 'base'
+    rag_enabled = '1' if has_cuda else '0'
+
+    os.environ['WHISPER_DEVICE'] = whisper_device
+    os.environ['WHISPER_MODEL'] = whisper_model
+    os.environ['RAG_ENABLED'] = rag_enabled
+
+    print(f"[Startup] device={whisper_device}, rag={'on' if rag_enabled=='1' else 'off'}, whisper={whisper_model}")
+
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,6 +35,9 @@ def main():
     # Import and run startup configuration
     try:
         from startup_config import configure_rag_choice, check_rag_dependencies
+
+        # Device check first
+        _startup_device_check()
         
         # If GPU is not available, force-disable RAG and skip interactive prompts
         gpu_available = False
@@ -61,9 +81,10 @@ def main():
             else:
                 print("📝 RAG functionality disabled - app will run without RAG")
         
-        # Set the RAG_ENABLED flag in the app module
+        # Set the RAG_ENABLED flag in the app module and env
         import app
         app.RAG_ENABLED = enable_rag
+        os.environ['RAG_ENABLED'] = '1' if enable_rag else '0'
         
         print(f"\n🎯 Configuration complete: RAG {'enabled' if enable_rag else 'disabled'}")
         print("="*60)

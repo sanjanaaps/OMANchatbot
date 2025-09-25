@@ -1,10 +1,10 @@
 """
-Voice recording and live transcription service (placeholders).
+Voice recording and live transcription service with fallback audio processing.
 
 This module provides a minimal, dependency-free surface you can wire to the
-chat UI's record button, waveform preview, and live transcript area. Replace
-the placeholder implementations with real microphone ingestion, audio
-processing, and streaming speech-to-text as needed.
+chat UI's record button, waveform preview, and live transcript area. It now
+includes fallback audio processing capabilities from server_audio_processor.py
+for when FFmpeg is not available.
 """
 
 from __future__ import annotations
@@ -12,9 +12,12 @@ from __future__ import annotations
 import os
 import time
 import uuid
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 # Default max duration for a recording session in milliseconds (1 minute)
@@ -54,8 +57,8 @@ class VoiceRecordingService:
     """Service to manage audio recording sessions and live transcription.
 
     All methods are designed to be dependency-free and safe to call from
-    route handlers or websockets. Replace placeholder sections with real
-    audio decoding, VAD, streaming STT, etc.
+    route handlers or websockets. Now includes fallback audio processing
+    capabilities for when FFmpeg is not available.
     """
 
     def __init__(self, base_dir: Optional[str] = None) -> None:
@@ -64,6 +67,24 @@ class VoiceRecordingService:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         # Active sessions indexed by session_id
         self._sessions: Dict[str, RecordingSession] = {}
+        
+        # Initialize fallback audio processor
+        self._fallback_processor = None
+        self._whisper_handler = None
+        self._initialize_fallback_processor()
+
+    def _initialize_fallback_processor(self) -> None:
+        """Initialize fallback audio processor from server_audio_processor.py"""
+        try:
+            # Import the fallback processor classes
+            from server_audio_processor import AudioProcessor, WhisperAudioHandler
+            self._fallback_processor = AudioProcessor()
+            self._whisper_handler = WhisperAudioHandler()
+            logger.info("Fallback audio processor initialized successfully")
+        except ImportError as e:
+            logger.warning(f"Fallback audio processor not available: {e}")
+        except Exception as e:
+            logger.error(f"Failed to initialize fallback audio processor: {e}")
 
     # -------- Session lifecycle --------
 
@@ -139,9 +160,8 @@ class VoiceRecordingService:
         session.chunks.append(chunk)
         session.chunk_timestamps_ms.append(now_ms)
 
-        # Placeholder: Simulate STT by appending a dot periodically
-        if len(session.chunks) % 3 == 0:
-            session.live_transcript = (session.live_transcript + " ").strip() + " ..."
+        # Placeholder live transcript disabled to avoid confusing UI output
+        # Real-time STT should update this from an actual recognizer
 
         if session.is_over_limit():
             session.closed = True
@@ -184,6 +204,49 @@ class VoiceRecordingService:
             return b""
         # Pick the largest chunk as best-effort audio
         return max(session.chunks, key=lambda b: len(b) if isinstance(b, (bytes, bytearray)) else 0)
+
+    def transcribe_audio_with_fallback(self, audio_bytes: bytes, format_hint: str = 'webm') -> Dict[str, str]:
+        """Transcribe audio using fallback processor when primary methods fail.
+        
+        Returns dict with: text, language, duration_s, load_time_s, infer_time_s, processor_used
+        """
+        logger.info(f"Starting transcription with fallback support, audio size: {len(audio_bytes)} bytes, format: {format_hint}")
+        
+        if not audio_bytes:
+            logger.warning("No audio data provided for transcription")
+            return {"text": "", "language": "", "duration_s": "0", "load_time_s": "0", "infer_time_s": "0", "processor_used": "none"}
+        
+        # Try fallback processor first if available
+        if self._whisper_handler:
+            try:
+                logger.info("Attempting transcription with fallback processor")
+                result = self._whisper_handler.transcribe_audio_bytes(audio_bytes, format_hint)
+                
+                if result.get('success'):
+                    logger.info(f"Fallback transcription successful: {result.get('text', '')[:100]}...")
+                    return {
+                        "text": result.get('text', ''),
+                        "language": result.get('language', ''),
+                        "duration_s": str(result.get('processing_info', {}).get('duration', '')),
+                        "load_time_s": "0",  # Fallback doesn't track load time separately
+                        "infer_time_s": "0",  # Fallback doesn't track inference time separately
+                        "processor_used": result.get('processing_info', {}).get('processor_used', 'fallback')
+                    }
+                else:
+                    logger.warning(f"Fallback transcription failed: {result.get('error', 'Unknown error')}")
+            except Exception as e:
+                logger.error(f"Fallback transcription error: {e}")
+        
+        # If fallback failed or not available, return empty result
+        logger.warning("All transcription methods failed or unavailable")
+        return {
+            "text": "",
+            "language": "",
+            "duration_s": "0",
+            "load_time_s": "0",
+            "infer_time_s": "0",
+            "processor_used": "none"
+        }
 
     # -------- Helpers --------
 
