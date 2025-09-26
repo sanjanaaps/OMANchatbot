@@ -1,0 +1,32 @@
+[Unit]
+Description=Central Bank of Oman Chatbot API Server
+Documentation=https://github.com/your-repo/cbo-chatbot
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/cbo-chatbot-backend
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=NODE_PORT=3001
+Environment=FLASK_BACKEND_URL=http://localhost:5000
+Environment=FRONTEND_URL=http://localhost
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cbo-api
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/cbo-chatbot-backend
+
+[Install]
+WantedBy=multi-user.target

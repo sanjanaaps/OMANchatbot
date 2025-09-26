@@ -52,7 +52,7 @@ def require_department(department):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             user = get_current_user()
-            if not user or user.get('department') != department:
+            if not user or user.department != department:
                 flash('Access denied: Insufficient permissions', 'error')
                 return redirect(url_for('dashboard'))
             return f(*args, **kwargs)
@@ -66,7 +66,7 @@ def is_authenticated():
 def get_user_department():
     """Get current user's department"""
     user = get_current_user()
-    return user.get('department') if user else None
+    return user.department if user else None
 
 def validate_user_access(department):
     """Validate if current user has access to department data"""

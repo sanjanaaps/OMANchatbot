@@ -1,0 +1,27 @@
+{
+  "name": "cbo-chatbot-api",
+  "version": "1.0.0",
+  "description": "Node.js API server for Central Bank of Oman Chatbot",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "cd frontend && npm run build",
+    "install-frontend": "cd frontend && npm install"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "multer": "^1.4.5-lts.1",
+    "helmet": "^7.1.0",
+    "express-rate-limit": "^7.1.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": ["chatbot", "cbo", "oman", "central-bank"],
+  "author": "Central Bank of Oman",
+  "license": "MIT"
+}

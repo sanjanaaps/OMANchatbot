@@ -2,7 +2,7 @@
 SQLAlchemy models for the Document Analyzer application
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import Index, Text
 import uuid

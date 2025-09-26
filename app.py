@@ -16,6 +16,7 @@ from app_lib.gemini import query_gemini, translate_text, get_department_focus, g
 from app_lib.difflib_responses import get_difflib_response
 from app_lib.structured_analysis import generate_structured_summary, is_pdf_document
 from app_lib.voice_service import VoiceRecordingService
+from app_lib.faq_service import get_faq_service
 # RAG integration - conditionally loaded based on user choice
 RAG_ENABLED = False
 RAG_AVAILABLE = False
@@ -105,6 +106,7 @@ def initialize_rag_if_enabled():
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
+
 @app.route('/')
 def index():
     # Initialize RAG on first request if enabled
@@ -116,26 +118,35 @@ def index():
     
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
-    return render_template('login.html')
+    return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
         
+        if not username or not password:
+            flash('Please enter both username and password.', 'error')
+            return render_template('login.html')
+        
+        # Get user from database
         user = User.query.filter_by(username=username).first()
         
-        if user and check_password_hash(user.password_hash, password):
-            session['user_id'] = user.id
-            session['username'] = user.username
-            session['department'] = user.department
-            flash('Login successful!', 'success')
-            return redirect(url_for('dashboard'))
-        else:
-            flash('Invalid username or password', 'error')
+        if not user or not check_password_hash(user.password_hash, password):
+            flash('Invalid username or password.', 'error')
+            return render_template('login.html')
+        
+        # Login successful
+        session['user_id'] = user.id
+        session['username'] = user.username
+        session['department'] = user.department
+        
+        flash(f'Welcome back, {user.username}!', 'success')
+        return redirect(url_for('dashboard'))
     
     return render_template('login.html')
+
 
 @app.route('/logout')
 def logout():
@@ -147,12 +158,14 @@ def logout():
 @login_required
 def dashboard():
     user = get_current_user()
+    if not user:
+        flash('User session expired. Please login again.', 'error')
+        return redirect(url_for('login'))
     
-    # Get recent documents for user's department
-    recent_docs = Document.query.filter_by(department=user.department).order_by(Document.upload_date.desc()).limit(10).all()
-    
-    # Get document count
-    doc_count = Document.query.filter_by(department=user.department).count()
+    # Get documents for user's department
+    user_department = user.department
+    recent_docs = Document.query.filter_by(department=user_department).order_by(Document.upload_date.desc()).limit(10).all()
+    doc_count = Document.query.filter_by(department=user_department).count()
     
     return render_template('dashboard.html', 
                          user=user, 
@@ -188,7 +201,6 @@ def upload():
                 
                 # Save document to database
                 user = get_current_user()
-                
                 document = Document(
                     filename=filename,
                     department=user.department,
@@ -218,7 +230,7 @@ def upload():
                 if is_pdf_document(filename):
                     # Use structured analysis for PDF documents
                     try:
-                        summary = generate_structured_summary(extracted_text, user.department, 'en')
+                        summary = generate_structured_summary(extracted_text, get_user_department_safe(user), 'en')
                         logger.info(f"Generated structured summary for PDF: {filename}")
                     except Exception as e:
                         logger.error(f"Structured analysis error: {str(e)}")
@@ -296,11 +308,23 @@ def chat():
             db.session.add(user_message)
             db.session.commit()
             
-            # Try RAG system first, then local search, then fallbacks
+            # Try FAQ service first, then RAG system, then local search, then fallbacks
             response = None
             
-            # Try RAG system first
-            if rag_system and rag_system.is_ready():
+            # Try FAQ service first - highest priority for CBO-specific questions
+            try:
+                faq_service = get_faq_service()
+                if faq_service.is_loaded():
+                    faq_match = faq_service.find_best_match(message, threshold=0.5)
+                    if faq_match:
+                        faq_question, faq_answer = faq_match
+                        response = faq_answer
+                        logger.info(f"Using FAQ response for query: '{message}' -> '{faq_question}'")
+            except Exception as e:
+                logger.error(f"FAQ service error: {str(e)}")
+            
+            # Try RAG system if FAQ didn't provide a response
+            if not response and rag_system and rag_system.is_ready():
                 try:
                     rag_response, rag_response_en = query_rag(message, language)
                     if rag_response and rag_response.strip() and not rag_response.startswith("RAG system not"):
@@ -371,9 +395,12 @@ def chat():
 @login_required
 def documents():
     user = get_current_user()
+    if not user:
+        flash('User session expired. Please login again.', 'error')
+        return redirect(url_for('login'))
     
     # Get all documents for user's department
-    docs = Document.query.filter_by(department=user.department).order_by(Document.upload_date.desc()).all()
+    docs = Document.query.filter_by(department=get_user_department_safe(user)).order_by(Document.upload_date.desc()).all()
     
     return render_template('documents.html', documents=docs, user=user)
 
@@ -463,9 +490,13 @@ def rag_ingest():
             }), 400
         
         user = get_current_user()
+        if not user:
+            return jsonify({
+                'status': 'error',
+                'message': 'User session expired'
+            }), 401
         
-        # Get all documents for user's department
-        docs = Document.query.filter_by(department=user.department).all()
+        docs = Document.query.filter_by(department=get_user_department_safe(user)).all()
         
         if not docs:
             return jsonify({
