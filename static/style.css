@@ -1,0 +1,141 @@
+/* Custom styles for Oman Central Bank Document Analyzer */
+
+/* Loading spinner */
+.spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #1e3a8a;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* File upload drag and drop */
+.upload-area {
+    transition: all 0.3s ease;
+}
+
+.upload-area.dragover {
+    border-color: #1e3a8a;
+    background-color: #eff6ff;
+}
+
+/* Chat messages */
+.chat-message {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Document cards */
+.document-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.document-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Search results */
+.search-result {
+    transition: background-color 0.2s ease;
+}
+
+.search-result:hover {
+    background-color: #f8fafc;
+}
+
+/* Language toggle */
+.lang-toggle {
+    transition: all 0.3s ease;
+}
+
+.lang-toggle:hover {
+    transform: scale(1.05);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .mobile-hidden {
+        display: none;
+    }
+    
+    .mobile-full {
+        width: 100%;
+    }
+}
+
+/* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #1e3a8a;
+    border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #1e40af;
+}
+
+/* Alert animations */
+.alert {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from { 
+        opacity: 0; 
+        transform: translateX(-100%); 
+    }
+    to { 
+        opacity: 1; 
+        transform: translateX(0); 
+    }
+}
+
+/* Button hover effects */
+.btn-primary {
+    transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(30, 58, 138, 0.3);
+}
+
+/* Form focus states */
+.form-input:focus {
+    box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
+    border-color: #1e3a8a;
+}
+
+/* Loading states */
+.loading {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+/* Success/Error states */
+.success-border {
+    border-color: #10b981;
+}
+
+.error-border {
+    border-color: #ef4444;
+}
