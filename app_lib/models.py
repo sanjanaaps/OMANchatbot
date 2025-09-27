@@ -49,6 +49,8 @@ class Document(db.Model):
     file_type = db.Column(db.String(10), nullable=False)
     file_size = db.Column(db.Integer, nullable=True)
     summary = db.Column(Text, nullable=True)
+    summary_ar = db.Column(Text, nullable=True)  # Arabic summary
+    document_type = db.Column(db.String(50), nullable=True)  # Financial document type
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -73,6 +75,8 @@ class Document(db.Model):
             'file_type': self.file_type,
             'file_size': self.file_size,
             'summary': self.summary,
+            'summary_ar': self.summary_ar,
+            'document_type': self.document_type,
             'content_preview': self.content[:200] + '...' if len(self.content) > 200 else self.content
         }
 

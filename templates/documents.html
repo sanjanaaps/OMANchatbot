@@ -37,6 +37,12 @@
                         <div class="ml-4">
                             <div class="text-sm font-medium text-gray-900">
                                 {{ doc.filename }}
+                                {% if not doc.summary and not doc.summary_ar %}
+                                <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                                    No Summary
+                                </span>
+                                {% endif %}
                             </div>
                             <div class="text-sm text-gray-500">
                                 Uploaded by {{ doc.uploaded_by }} • {{ doc.upload_date.strftime('%Y-%m-%d %H:%M') }}
@@ -51,6 +57,14 @@
                             <i class="fas fa-lock mr-1"></i>
                             {{ doc.department }}
                         </span>
+                        {% if not doc.summary and not doc.summary_ar %}
+                        <button onclick="reingestDocument('{{ doc.id }}')" 
+                                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 transition-colors"
+                                title="Re-ingest document to generate summary">
+                            <i class="fas fa-redo mr-1"></i>
+                            Re-ingest
+                        </button>
+                        {% endif %}
                     </div>
                 </div>
             </li>
@@ -70,4 +84,73 @@
     </div>
     {% endif %}
 </div>
+
+<script>
+function reingestDocument(documentId) {
+    // Show loading state
+    const button = event.target;
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Re-ingesting...';
+    button.disabled = true;
+    
+    // Make API call to re-ingest
+    fetch('/reingest-document', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            document_id: documentId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show success message and reload page
+            showAlert('Document re-ingested successfully! Refreshing page...', 'success');
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        } else {
+            // Show error message
+            showAlert(data.error || 'Failed to re-ingest document. Please try again.', 'error');
+            button.innerHTML = originalText;
+            button.disabled = false;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showAlert('Network error. Please check your connection and try again.', 'error');
+        button.innerHTML = originalText;
+        button.disabled = false;
+    });
+}
+
+function showAlert(message, type) {
+    // Create alert element
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg max-w-md ${
+        type === 'success' ? 'bg-green-100 border border-green-400 text-green-700' : 'bg-red-100 border border-red-400 text-red-700'
+    }`;
+    alertDiv.innerHTML = `
+        <div class="flex items-center">
+            <i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} mr-2"></i>
+            <span>${message}</span>
+            <button onclick="this.parentElement.parentElement.remove()" class="ml-4 text-gray-500 hover:text-gray-700">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `;
+    
+    // Add to page
+    document.body.appendChild(alertDiv);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        if (alertDiv.parentElement) {
+            alertDiv.remove();
+        }
+    }, 5000);
+}
+</script>
 {% endblock %}

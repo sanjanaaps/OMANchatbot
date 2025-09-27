@@ -1,0 +1,27 @@
+# Hallucination Fixed RAG System Requirements
+# Core RAG dependencies
+langchain>=0.1.0
+langchain-community>=0.0.20
+langchain-huggingface>=0.0.1
+transformers>=4.30.0
+torch>=2.0.0
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.4
+
+# Document processing
+pdfplumber>=0.9.0
+pytesseract>=0.3.10
+Pillow>=9.0.0
+
+# Translation
+deep-translator>=1.11.0
+
+# Additional dependencies
+huggingface-hub>=0.16.0
+accelerate>=0.20.0
+bitsandbytes>=0.41.0
+
+# Optional GPU support
+# Uncomment the following line if you have CUDA available
+# faiss-gpu>=1.7.4
+

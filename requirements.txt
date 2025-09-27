@@ -171,3 +171,11 @@ librosa
 
 # Optional (uncomment if you want programmatic ffmpeg access)
 # ffmpeg-python>=0.2.0
+
+# ------------------------------------------------------------
+# Hallucination Fixed RAG Dependencies
+#   - Additional packages for the hallucination-fixed RAG system
+#   - Falcon model and related dependencies
+# ------------------------------------------------------------
+accelerate>=0.20.0
+bitsandbytes>=0.41.0

@@ -259,6 +259,342 @@ def generate_fallback_summary(text: str, department: str, language: str = 'en') 
 • Conclusion: Important document contributing to better understanding of department operations
 • Key Insight: Document provides valuable insights for performance improvement and efficiency"""
 
+def analyze_financial_document(text: str, department: str, language: str = 'en') -> str:
+    """
+    Analyze financial documents using specialized prompt template
+    
+    Args:
+        text: Document text content
+        department: User's department
+        language: Response language
+        
+    Returns:
+        Structured financial document analysis
+    """
+    try:
+        # Financial document analysis prompt template
+        compact_prompt_template = """Analyze this financial document and extract key information:
+
+DOCUMENT: {document_content}
+
+**DOCUMENT ANALYSIS:**
+- Type: [Auto-detect: Invoice/Wire Transfer/Loan Payment/Remittance/Statement/Other]
+- Reference/ID: 
+- Date: 
+- Status: 
+
+**FINANCIAL SUMMARY:**
+- Main Amount: 
+- Currency: 
+- From: 
+- To: 
+- Purpose: 
+
+**DETAILED BREAKDOWN:**
+- Account Numbers: 
+- Transaction ID: 
+- Fees/Interest/Tax: 
+- Payment Method: 
+- Due Dates: 
+- Balance Information: 
+
+**KEY FINDINGS:**
+Extract 3-5 most important pieces of information based on document type:
+1. 
+2. 
+3. 
+4. 
+5. 
+
+**SUMMARY:**
+[2-3 sentence overview of the document's purpose and financial impact]
+
+RULES: Use only information visible in the document. Mark unclear items as "Unclear" and missing items as "Not specified"."""
+
+        # Truncate text to avoid token limits (keep first 4000 characters)
+        document_content = text[:4000]
+        
+        if language == 'ar':
+            # Arabic version of the prompt
+            prompt = f"""قم بتحليل هذا المستند المالي واستخراج المعلومات الرئيسية:
+
+المستند: {document_content}
+
+**تحليل المستند:**
+- النوع: [تحديد تلقائي: فاتورة/تحويل بنكي/دفعة قرض/تحويل/كشف حساب/أخرى]
+- المرجع/المعرف: 
+- التاريخ: 
+- الحالة: 
+
+**الملخص المالي:**
+- المبلغ الرئيسي: 
+- العملة: 
+- من: 
+- إلى: 
+- الغرض: 
+
+**التفاصيل:**
+- أرقام الحسابات: 
+- معرف المعاملة: 
+- الرسوم/الفائدة/الضريبة: 
+- طريقة الدفع: 
+- تواريخ الاستحقاق: 
+- معلومات الرصيد: 
+
+**النتائج الرئيسية:**
+استخرج 3-5 معلومات مهمة بناءً على نوع المستند:
+1. 
+2. 
+3. 
+4. 
+5. 
+
+**الملخص:**
+[نظرة عامة من 2-3 جملة حول غرض المستند وتأثيره المالي]
+
+القواعد: استخدم فقط المعلومات الظاهرة في المستند. ضع علامة على العناصر غير الواضحة كـ "غير واضح" والعناصر المفقودة كـ "غير محدد"."""
+        else:
+            prompt = compact_prompt_template.format(document_content=document_content)
+        
+        # Use Gemini for financial document analysis
+        analysis = query_gemini(prompt, department, language)
+        
+        if analysis and len(analysis.strip()) > 100:
+            logger.info(f"Generated financial document analysis with Gemini for {department} department")
+            return analysis
+        
+        raise Exception("Gemini financial analysis response not properly structured")
+        
+    except Exception as e:
+        logger.error(f"Gemini financial document analysis failed: {str(e)}")
+        
+        # Fallback to local financial analysis
+        try:
+            return generate_local_financial_analysis(text, department, language)
+        except Exception as local_error:
+            logger.error(f"Local financial analysis failed: {str(local_error)}")
+            return generate_fallback_financial_analysis(text, department, language)
+
+def generate_local_financial_analysis(text: str, department: str, language: str = 'en') -> str:
+    """
+    Generate financial document analysis using local analysis when Gemini fails
+    
+    Args:
+        text: Document text content
+        department: User's department
+        language: Response language
+        
+    Returns:
+        Local financial document analysis
+    """
+    # Extract common financial patterns
+    amount_pattern = r'[\$£€¥₹]\s*[\d,]+\.?\d*|\d+\.?\d*\s*[\$£€¥₹]|amount[:\s]*[\d,]+\.?\d*'
+    date_pattern = r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}'
+    account_pattern = r'account[:\s]*[\d\w-]+|acct[:\s]*[\d\w-]+'
+    reference_pattern = r'ref[:\s]*[\d\w-]+|reference[:\s]*[\d\w-]+|id[:\s]*[\d\w-]+'
+    
+    amounts = re.findall(amount_pattern, text, re.IGNORECASE)
+    dates = re.findall(date_pattern, text)
+    accounts = re.findall(account_pattern, text, re.IGNORECASE)
+    references = re.findall(reference_pattern, text, re.IGNORECASE)
+    
+    # Detect document type based on keywords
+    text_lower = text.lower()
+    doc_type = "Other"
+    
+    if any(word in text_lower for word in ['statement', 'account', 'balance']):
+        doc_type = "Statement"
+    elif any(word in text_lower for word in ['invoice', 'bill', 'charge']):
+        doc_type = "Invoice"
+    elif any(word in text_lower for word in ['transfer', 'wire', 'remittance']):
+        doc_type = "Wire Transfer"
+    elif any(word in text_lower for word in ['payment', 'loan', 'repayment']):
+        doc_type = "Loan Payment"
+    elif any(word in text_lower for word in ['receipt', 'confirmation']):
+        doc_type = "Receipt"
+    
+    if language == 'ar':
+        analysis = f"""**تحليل المستند:**
+- النوع: {doc_type}
+- المرجع/المعرف: {references[0] if references else 'غير محدد'}
+- التاريخ: {dates[0] if dates else 'غير محدد'}
+- الحالة: غير محدد
+
+**الملخص المالي:**
+- المبلغ الرئيسي: {amounts[0] if amounts else 'غير محدد'}
+- العملة: غير محدد
+- من: غير محدد
+- إلى: غير محدد
+- الغرض: تحليل محلي للمستند المالي
+
+**التفاصيل:**
+- أرقام الحسابات: {accounts[0] if accounts else 'غير محدد'}
+- معرف المعاملة: {references[0] if references else 'غير محدد'}
+- الرسوم/الفائدة/الضريبة: غير محدد
+- طريقة الدفع: غير محدد
+- تواريخ الاستحقاق: {dates[0] if dates else 'غير محدد'}
+- معلومات الرصيد: غير محدد
+
+**النتائج الرئيسية:**
+1. تم تحديد نوع المستند كـ {doc_type}
+2. تم العثور على {len(amounts)} مبلغ مالي في المستند
+3. تم العثور على {len(dates)} تاريخ في المستند
+4. المستند يحتوي على معلومات مالية لقسم {department}
+5. يتطلب مراجعة يدوية للحصول على تفاصيل دقيقة
+
+**الملخص:**
+هذا تحليل محلي للمستند المالي. تم استخراج المعلومات الأساسية باستخدام أنماط النص. يوصى بمراجعة يدوية للحصول على تحليل أكثر دقة وتفصيلاً."""
+    else:
+        analysis = f"""**DOCUMENT ANALYSIS:**
+- Type: {doc_type}
+- Reference/ID: {references[0] if references else 'Not specified'}
+- Date: {dates[0] if dates else 'Not specified'}
+- Status: Not specified
+
+**FINANCIAL SUMMARY:**
+- Main Amount: {amounts[0] if amounts else 'Not specified'}
+- Currency: Not specified
+- From: Not specified
+- To: Not specified
+- Purpose: Local analysis of financial document
+
+**DETAILED BREAKDOWN:**
+- Account Numbers: {accounts[0] if accounts else 'Not specified'}
+- Transaction ID: {references[0] if references else 'Not specified'}
+- Fees/Interest/Tax: Not specified
+- Payment Method: Not specified
+- Due Dates: {dates[0] if dates else 'Not specified'}
+- Balance Information: Not specified
+
+**KEY FINDINGS:**
+1. Document type identified as {doc_type}
+2. Found {len(amounts)} financial amounts in document
+3. Found {len(dates)} dates in document
+4. Document contains financial information for {department} department
+5. Requires manual review for accurate details
+
+**SUMMARY:**
+This is a local analysis of the financial document. Basic information was extracted using text patterns. Manual review is recommended for more accurate and detailed analysis."""
+    
+    return analysis
+
+def generate_fallback_financial_analysis(text: str, department: str, language: str = 'en') -> str:
+    """
+    Generate a basic fallback financial analysis when all other methods fail
+    
+    Args:
+        text: Document text content
+        department: User's department
+        language: Response language
+        
+    Returns:
+        Basic financial document analysis
+    """
+    word_count = len(text.split())
+    
+    if language == 'ar':
+        return f"""**تحليل المستند:**
+- النوع: مستند مالي
+- المرجع/المعرف: غير محدد
+- التاريخ: غير محدد
+- الحالة: غير محدد
+
+**الملخص المالي:**
+- المبلغ الرئيسي: غير محدد
+- العملة: غير محدد
+- From: غير محدد
+- To: غير محدد
+- الغرض: تحليل أساسي للمستند
+
+**التفاصيل:**
+- أرقام الحسابات: غير محدد
+- معرف المعاملة: غير محدد
+- الرسوم/الفائدة/الضريبة: غير محدد
+- طريقة الدفع: غير محدد
+- تواريخ الاستحقاق: غير محدد
+- معلومات الرصيد: غير محدد
+
+**النتائج الرئيسية:**
+1. المستند يحتوي على {word_count} كلمة
+2. يتطلب مراجعة يدوية للتحليل الدقيق
+3. المستند مخصص لقسم {department}
+4. يحتوي على معلومات مالية أو بنكية
+5. يوصى بمراجعة تفصيلية
+
+**الملخص:**
+هذا تحليل أساسي للمستند المالي. يتطلب مراجعة يدوية للحصول على تفاصيل دقيقة ومعلومات مالية محددة."""
+    else:
+        return f"""**DOCUMENT ANALYSIS:**
+- Type: Financial Document
+- Reference/ID: Not specified
+- Date: Not specified
+- Status: Not specified
+
+**FINANCIAL SUMMARY:**
+- Main Amount: Not specified
+- Currency: Not specified
+- From: Not specified
+- To: Not specified
+- Purpose: Basic document analysis
+
+**DETAILED BREAKDOWN:**
+- Account Numbers: Not specified
+- Transaction ID: Not specified
+- Fees/Interest/Tax: Not specified
+- Payment Method: Not specified
+- Due Dates: Not specified
+- Balance Information: Not specified
+
+**KEY FINDINGS:**
+1. Document contains {word_count} words
+2. Requires manual review for accurate analysis
+3. Document is for {department} department
+4. Contains financial or banking information
+5. Detailed review recommended
+
+**SUMMARY:**
+This is a basic analysis of the financial document. Manual review is required for accurate details and specific financial information."""
+
+def detect_financial_document_type(filename: str, text: str) -> str:
+    """
+    Detect if document is a financial document and return type
+    
+    Args:
+        filename: Name of the uploaded file
+        text: Document text content
+        
+    Returns:
+        Document type or None if not financial
+    """
+    # Financial document keywords
+    financial_keywords = [
+        'bank statement', 'payment receipt', 'remittance advice', 'wire transfer',
+        'debit memo', 'credit memo', 'loan repayment', 'bank invoice',
+        'cheque', 'check stub', 'deposit slip', 'bank draft', 'overdraft',
+        'interest payment', 'transaction record', 'fees statement',
+        'statement of account', 'letter of credit', 'bank guarantee',
+        'credit card statement', 'payment plan', 'invoice', 'bill',
+        'payment', 'transfer', 'remittance', 'deposit', 'withdrawal'
+    ]
+    
+    # Check filename
+    filename_lower = filename.lower()
+    for keyword in financial_keywords:
+        if keyword in filename_lower:
+            return keyword.title()
+    
+    # Check text content
+    text_lower = text.lower()
+    for keyword in financial_keywords:
+        if keyword in text_lower:
+            return keyword.title()
+    
+    # Check for financial patterns
+    if re.search(r'\$\d+|\d+\.\d{2}|\b(amount|total|balance|payment|transfer)\b', text_lower):
+        return "Financial Document"
+    
+    return None
+
 def is_pdf_document(filename: str) -> bool:
     """
     Check if the uploaded file is a PDF document
