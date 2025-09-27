@@ -1,22 +1,18 @@
-# Apache .htaccess for React Router support
-# This file should be placed in the DocumentRoot directory
+# Apache .htaccess configuration for CBO Flask Application
+# This file should be placed in the document root
 
+# Enable mod_rewrite
 RewriteEngine On
-RewriteBase /
 
-# Handle React Router - serve index.html for all routes
-RewriteRule ^index\.html$ - [L]
+# Proxy all requests to Flask application
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule . /index.html [L]
+RewriteRule ^(.*)$ http://127.0.0.1:5000/$1 [P,L]
 
 # Security headers
-<IfModule mod_headers.c>
-    Header always set X-Content-Type-Options nosniff
-    Header always set X-Frame-Options DENY
-    Header always set X-XSS-Protection "1; mode=block"
-    Header always set Referrer-Policy "strict-origin-when-cross-origin"
-</IfModule>
+Header always set X-Content-Type-Options nosniff
+Header always set X-Frame-Options DENY
+Header always set X-XSS-Protection "1; mode=block"
 
 # Compression
 <IfModule mod_deflate.c>
@@ -31,7 +27,7 @@ RewriteRule . /index.html [L]
     AddOutputFilterByType DEFLATE application/x-javascript
 </IfModule>
 
-# Caching
+# Caching for static assets
 <IfModule mod_expires.c>
     ExpiresActive On
     ExpiresByType text/css "access plus 1 month"
@@ -41,8 +37,4 @@ RewriteRule . /index.html [L]
     ExpiresByType image/jpeg "access plus 1 month"
     ExpiresByType image/gif "access plus 1 month"
     ExpiresByType image/ico "access plus 1 month"
-    ExpiresByType image/icon "access plus 1 month"
-    ExpiresByType text/plain "access plus 1 month"
-    ExpiresByType application/x-shockwave-flash "access plus 1 month"
-    ExpiresByType text/html "access plus 1 day"
 </IfModule>

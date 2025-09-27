@@ -27,7 +27,7 @@ def _startup_device_check() -> None:
 os.environ['POSTGRES_URI'] = 'postgresql://postgres:1234@localhost:5432/doc_analyzer'
 os.environ['FLASK_SECRET_KEY'] = 'dev-secret-key-change-in-production'
 os.environ['DB_NAME'] = 'doc_analyzer'
-os.environ['GEMINI_API_KEY'] = '' # Set your actual Gemini API key here
+os.environ['GEMINI_API_KEY'] = 'AIzaSyDdhnZAXLkXyfi0AreK_k82GlvFKt6dVmI' # Set your actual Gemini API key here
 
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

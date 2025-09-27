@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        .spectrum-container {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .spectrum { width: 100%; height: 200px; }
+    </style>
+</head>
+<body>
+    <div class="spectrum-container">
+        <canvas id="spectrumAnalyzer" class="spectrum"></canvas>
+    </div>
+
+    <script>
+        const specCanvas = document.getElementById('spectrumAnalyzer');
+        const specCtx = specCanvas.getContext('2d');
+        specCanvas.width = 800;
+        specCanvas.height = 200;
+
+        function drawSpectrum() {
+            specCtx.clearRect(0, 0, specCanvas.width, specCanvas.height);
+            
+            const barWidth = 4;
+            const barCount = specCanvas.width / (barWidth + 1);
+            
+            for (let i = 0; i < barCount; i++) {
+                const height = Math.random() * specCanvas.height * 0.8;
+                const hue = (i / barCount) * 360;
+                
+                specCtx.fillStyle = `hsl(${hue}, 70%, 60%)`;
+                specCtx.fillRect(i * (barWidth + 1), specCanvas.height - height, barWidth, height);
+                
+                // Glow effect
+                specCtx.shadowBlur = 10;
+                specCtx.shadowColor = `hsl(${hue}, 70%, 60%)`;
+                specCtx.fillRect(i * (barWidth + 1), specCanvas.height - height, barWidth, height);
+                specCtx.shadowBlur = 0;
+            }
+        }
+
+        setInterval(drawSpectrum, 50);
+    </script>
+</body>
+</html>

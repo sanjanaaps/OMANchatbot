@@ -20,6 +20,14 @@ from app_lib.structured_analysis import (
     analyze_financial_document, 
     detect_financial_document_type
 )
+from app_lib.prompt_templates import (
+    get_prompt_template, 
+    match_document_type, 
+    is_financial_document_type,
+    format_prompt_template,
+    RAG_PROMPT_TEMPLATE
+)
+from app_lib.sensitive_data_masking import mask_sensitive_data, should_mask_for_user, get_masking_info
 from app_lib.voice_service import VoiceRecordingService
 from app_lib.faq_service import get_faq_service
 # Hallucination Fixed RAG integration - conditionally loaded based on user choice
@@ -58,6 +66,11 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Suppress PDF processing warnings
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='pdfminer')
+warnings.filterwarnings('ignore', message='.*Cannot set gray stroke color.*')
 
 # Initialize Whisper at startup (ignore UI/testing integrations)
 WHISPER_SERVICE = None
@@ -100,8 +113,8 @@ def initialize_rag_if_enabled():
             RAG_AVAILABLE = True
             logger.info("Hallucination Fixed RAG integration enabled - initializing...")
             
-            # Initialize RAG system with weights file support
-            rag_system = initialize_rag_system(app.config['UPLOAD_FOLDER'])
+            # Initialize RAG system without document ingestion (use ingest_documents_gpu.py for ingestion)
+            rag_system = initialize_rag_system(app.config['UPLOAD_FOLDER'], ingest_documents=False)
             if rag_system:
                 # Try to load existing weights if available and model is loaded
                 weights_path = os.path.join(app.config['UPLOAD_FOLDER'], "falcon_h1_weights.pth")
@@ -129,6 +142,29 @@ def initialize_rag_if_enabled():
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+def apply_sensitive_data_masking(text: str, user_department: str) -> str:
+    """
+    Apply sensitive data masking to text based on user department
+    
+    Args:
+        text: The text to mask
+        user_department: The department of the logged-in user
+        
+    Returns:
+        str: Text with sensitive information masked
+    """
+    if not text or not text.strip():
+        return text
+        
+    try:
+        masked_text = mask_sensitive_data(text, user_department)
+        if masked_text != text:
+            logger.info(f"Applied sensitive data masking for {user_department} department")
+        return masked_text
+    except Exception as e:
+        logger.error(f"Error applying sensitive data masking: {str(e)}")
+        return text
 
 
 @app.route('/')
@@ -214,6 +250,9 @@ def upload():
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
             
+            # Get user-specified document type
+            user_document_type = request.form.get('document_type', '').strip()
+            
             try:
                 # Extract text from file
                 extracted_text = extract_text_from_file(filepath)
@@ -223,8 +262,21 @@ def upload():
                     os.remove(filepath)
                     return redirect(request.url)
                 
-                # Detect document type early for database storage
-                financial_doc_type = detect_financial_document_type(filename, extracted_text)
+                # Determine document type: user-specified > auto-detected
+                if user_document_type:
+                    # Try to match user input to financial document types
+                    matched_type = match_document_type(user_document_type)
+                    if matched_type:
+                        financial_doc_type = matched_type
+                        logger.info(f"User specified document type '{user_document_type}' matched to '{matched_type}'")
+                    else:
+                        # Use user input as-is if no match found
+                        financial_doc_type = user_document_type
+                        logger.info(f"User specified document type '{user_document_type}' (not in financial types)")
+                else:
+                    # Auto-detect document type
+                    financial_doc_type = detect_financial_document_type(filename, extracted_text)
+                    logger.info(f"Auto-detected document type: {financial_doc_type}")
                 
                 # Save document to database
                 user = get_current_user()
@@ -260,22 +312,28 @@ def upload():
                 # Try RAG system first for document summarization
                 if rag_system and rag_system.is_ready():
                     try:
-                        # Use RAG system to generate summary using the prompt template
-                        rag_summary, rag_summary_en = query_rag(
-                            f"Please provide a comprehensive summary of this {user.department} department document: {extracted_text[:2000]}", 
-                            'en', 
-                            user.department
-                        )
-                        rag_summary_ar, _ = query_rag(
-                            f"Please provide a comprehensive summary of this {user.department} department document: {extracted_text[:2000]}", 
-                            'ar', 
-                            user.department
-                        )
+                        # Use RAG system to generate summary using the appropriate prompt template
+                        if is_financial_document_type(financial_doc_type):
+                            # Use financial document analysis prompt
+                            prompt = format_prompt_template(
+                                get_prompt_template(financial_doc_type, "financial"),
+                                document_content=extracted_text[:2000]
+                            )
+                        else:
+                            # Use general document analysis prompt
+                            prompt = format_prompt_template(
+                                get_prompt_template(financial_doc_type, "general"),
+                                document_content=extracted_text[:2000]
+                            )
+                        
+                        rag_summary, rag_summary_en = query_rag(prompt, 'en', user.department)
+                        # Translate English summary to Arabic instead of generating separately
+                        rag_summary_ar = translate_text(rag_summary, 'ar')
                         
                         if rag_summary and not rag_summary.startswith("RAG system not") and len(rag_summary.strip()) > 50:
                             summary = rag_summary
                             summary_ar = rag_summary_ar
-                            logger.info(f"Generated RAG-based summary for: {filename}")
+                            logger.info(f"Generated RAG-based summary for: {filename} (type: {financial_doc_type})")
                         else:
                             raise Exception("RAG system returned invalid response")
                     except Exception as e:
@@ -290,18 +348,18 @@ def upload():
                 
                 # Fallback to structured analysis if RAG didn't work
                 if not summary:
-                    if financial_doc_type:
+                    if is_financial_document_type(financial_doc_type):
                         # Use financial document analysis for financial documents
                         try:
                             summary = analyze_financial_document(extracted_text, user.department, 'en')
-                            summary_ar = analyze_financial_document(extracted_text, user.department, 'ar')
+                            summary_ar = translate_text(summary, 'ar')
                             logger.info(f"Generated financial document analysis for {financial_doc_type}: {filename}")
                         except Exception as e:
                             logger.error(f"Financial document analysis error: {str(e)}")
                             # Fallback to structured analysis
                             try:
                                 summary = generate_structured_summary(extracted_text, user.department, 'en')
-                                summary_ar = generate_structured_summary(extracted_text, user.department, 'ar')
+                                summary_ar = translate_text(summary, 'ar')
                                 logger.info(f"Fallback to structured summary for: {filename}")
                             except Exception as e2:
                                 logger.error(f"Structured analysis fallback error: {str(e2)}")
@@ -317,16 +375,42 @@ def upload():
                                     else:
                                         summary = f"Financial Document Summary: This {user.department} department financial document contains {word_count} words of financial information. Key topics include: {', '.join(words[:15])}..."
                                 
-                                # Generate Arabic summary using local fallback
+                                # Translate English summary to Arabic
                                 try:
-                                    summary_ar = f"ملخص المستند المالي: هذا المستند المالي من قسم {user.department} ({word_count} كلمة) يحتوي على معلومات حول: {key_content[:100]}..." if key_content else f"ملخص المستند المالي: هذا المستند المالي من قسم {user.department} يحتوي على {word_count} كلمة من المعلومات المالية. الموضوعات الرئيسية تشمل: {', '.join(words[:10])}..."
+                                    summary_ar = translate_text(summary, 'ar')
                                 except:
                                     summary_ar = f"ملخص المستند المالي: تم تحليل مستند مالي من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية."
+                    else:
+                        # Use structured analysis for non-financial documents
+                        try:
+                            summary = generate_structured_summary(extracted_text, user.department, 'en')
+                            summary_ar = translate_text(summary, 'ar')
+                            logger.info(f"Generated structured summary for non-financial document: {filename}")
+                        except Exception as e:
+                            logger.error(f"Structured analysis error: {str(e)}")
+                            # Fallback to regular summary
+                            summary = get_document_summary(extracted_text)
+                            if not summary or "Hello! I'm your AI assistant" in summary or len(summary.strip()) < 50:
+                                words = extracted_text.split()
+                                word_count = len(words)
+                                sentences = extracted_text.split('.')[:3]
+                                key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+                                key_content = '. '.join(key_sentences[:2])
+                                if key_content:
+                                    summary = f"Document Summary: This {user.department} department document ({word_count} words) contains information about: {key_content}..."
+                                else:
+                                    summary = f"Document Summary: This {user.department} department document contains {word_count} words of information. Key topics include: {', '.join(words[:15])}..."
+                            
+                            # Translate English summary to Arabic
+                            try:
+                                summary_ar = translate_text(summary, 'ar')
+                            except:
+                                summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة."
                 elif is_pdf_document(filename):
                     # Use structured analysis for non-financial PDF documents
                     try:
                         summary = generate_structured_summary(extracted_text, user.department, 'en')
-                        summary_ar = generate_structured_summary(extracted_text, user.department, 'ar')
+                        summary_ar = translate_text(summary, 'ar')
                         logger.info(f"Generated structured summary for PDF: {filename}")
                     except Exception as e:
                         logger.error(f"Structured analysis error: {str(e)}")
@@ -343,16 +427,16 @@ def upload():
                             else:
                                 summary = f"Document Summary: This {user.department} department document contains {word_count} words of financial and policy information. Key topics include: {', '.join(words[:15])}..."
                         
-                        # Generate Arabic summary using local fallback
+                        # Translate English summary to Arabic
                         try:
-                            summary_ar = f"ملخص المستند: هذا المستند من قسم {user.department} ({word_count} كلمة) يحتوي على معلومات حول: {key_content[:100]}..." if key_content else f"ملخص المستند: هذا المستند من قسم {user.department} يحتوي على {word_count} كلمة من المعلومات المالية والسياسية. الموضوعات الرئيسية تشمل: {', '.join(words[:10])}..."
+                            summary_ar = translate_text(summary, 'ar')
                         except:
                             summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية والسياسات."
                 else:
                     # Use regular summary for non-PDF, non-financial documents
                     try:
                         summary = query_gemini(f"Please provide a concise summary of this {user.department} department document:\n\n{extracted_text[:2000]}", user.department, 'en')
-                        summary_ar = query_gemini(f"Please provide a concise summary of this {user.department} department document:\n\n{extracted_text[:2000]}", user.department, 'ar')
+                        summary_ar = translate_text(summary, 'ar')
                         # Check if we got a generic response
                         if "Hello! I'm your AI assistant" in summary or "How can I assist you today" in summary:
                             raise Exception("Got generic response from Gemini")
@@ -373,9 +457,9 @@ def upload():
                             else:
                                 summary = f"Document Summary: This {user.department} department document contains {word_count} words of financial and policy information. Key topics include: {', '.join(words[:15])}..."
                         
-                        # Generate Arabic summary using local fallback
+                        # Translate English summary to Arabic
                         try:
-                            summary_ar = f"ملخص المستند: هذا المستند من قسم {user.department} ({word_count} كلمة) يحتوي على معلومات حول: {key_content[:100]}..." if key_content else f"ملخص المستند: هذا المستند من قسم {user.department} يحتوي على {word_count} كلمة من المعلومات المالية والسياسية. الموضوعات الرئيسية تشمل: {', '.join(words[:10])}..."
+                            summary_ar = translate_text(summary, 'ar')
                         except:
                             summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية والسياسات."
                 
@@ -384,17 +468,26 @@ def upload():
                 result.summary_ar = summary_ar
                 db.session.commit()
                 
+                # Apply sensitive data masking only to document summaries (not chat)
+                masked_summary = apply_sensitive_data_masking(summary, user.department) if summary else None
+                masked_summary_ar = apply_sensitive_data_masking(summary_ar, user.department) if summary_ar else None
+                
                 # Debug logging
                 logger.info(f"Summary generated - English: {bool(summary)}, Arabic: {bool(summary_ar)}")
                 logger.info(f"English summary preview: {summary[:100] if summary else 'None'}...")
                 logger.info(f"Arabic summary preview: {summary_ar[:100] if summary_ar else 'None'}...")
+                logger.info(f"Arabic summary length: {len(summary_ar) if summary_ar else 0}")
+                logger.info(f"Arabic summary type: {type(summary_ar)}")
+                logger.info(f"Sensitive data masking applied to document summary: {should_mask_for_user(user.department)}")
                 
                 flash(f'File uploaded successfully! Document ID: {result.id}', 'success')
                 return render_template('upload_success.html', 
                                      document_id=result.id,
-                                     summary=summary,
-                                     summary_ar=summary_ar,
-                                     filename=filename)
+                                     summary=masked_summary,
+                                     summary_ar=masked_summary_ar,
+                                     filename=filename,
+                                     user_department=user.department,
+                                     masking_info=get_masking_info(user.department))
                 
             except Exception as e:
                 logger.error(f"Error processing file {filename}: {str(e)}")
@@ -414,6 +507,7 @@ def reingest_document():
     try:
         data = request.get_json()
         document_id = data.get('document_id')
+        user_document_type = data.get('document_type', '').strip()
         
         if not document_id:
             return jsonify({"success": False, "error": "Document ID is required"}), 400
@@ -440,28 +534,110 @@ def reingest_document():
         if not extracted_text.strip():
             return jsonify({"success": False, "error": "No text could be extracted from the file"}), 400
         
-        # Detect document type and generate appropriate analysis
-        financial_doc_type = detect_financial_document_type(document.filename, extracted_text)
+        # Determine document type: user-specified > existing > auto-detected
+        if user_document_type:
+            # Try to match user input to financial document types
+            matched_type = match_document_type(user_document_type)
+            if matched_type:
+                financial_doc_type = matched_type
+                logger.info(f"Re-ingestion: User specified document type '{user_document_type}' matched to '{matched_type}'")
+            else:
+                # Use user input as-is if no match found
+                financial_doc_type = user_document_type
+                logger.info(f"Re-ingestion: User specified document type '{user_document_type}' (not in financial types)")
+        elif document.document_type:
+            # Use existing document type
+            financial_doc_type = document.document_type
+            logger.info(f"Re-ingestion: Using existing document type '{financial_doc_type}'")
+        else:
+            # Auto-detect document type
+            financial_doc_type = detect_financial_document_type(document.filename, extracted_text)
+            logger.info(f"Re-ingestion: Auto-detected document type: {financial_doc_type}")
         
         # Generate summaries based on document type
         summary_en = None
         summary_ar = None
         
-        if financial_doc_type:
-            # Use financial document analysis for financial documents
+        # Try RAG system first for document summarization
+        if rag_system and rag_system.is_ready():
             try:
-                summary_en = analyze_financial_document(extracted_text, user.department, 'en')
-                summary_ar = analyze_financial_document(extracted_text, user.department, 'ar')
-                logger.info(f"Re-generated financial document analysis for {financial_doc_type}: {document.filename}")
+                # Use RAG system to generate summary using the appropriate prompt template
+                if is_financial_document_type(financial_doc_type):
+                    # Use financial document analysis prompt
+                    prompt = format_prompt_template(
+                        get_prompt_template(financial_doc_type, "financial"),
+                        document_content=extracted_text[:2000]
+                    )
+                else:
+                    # Use general document analysis prompt
+                    prompt = format_prompt_template(
+                        get_prompt_template(financial_doc_type, "general"),
+                        document_content=extracted_text[:2000]
+                    )
+                
+                rag_summary, rag_summary_en = query_rag(prompt, 'en', user.department)
+                # Translate English summary to Arabic instead of generating separately
+                rag_summary_ar = translate_text(rag_summary, 'ar')
+                
+                if rag_summary and not rag_summary.startswith("RAG system not") and len(rag_summary.strip()) > 50:
+                    summary_en = rag_summary
+                    summary_ar = rag_summary_ar
+                    logger.info(f"Re-generated RAG-based summary for: {document.filename} (type: {financial_doc_type})")
+                else:
+                    raise Exception("RAG system returned invalid response")
             except Exception as e:
-                logger.error(f"Financial document analysis error during re-ingestion: {str(e)}")
+                logger.warning(f"RAG summarization failed during re-ingestion: {str(e)}, falling back to structured analysis")
                 # Fallback to structured analysis
+                summary_en = None
+                summary_ar = None
+        else:
+            logger.info("RAG system not ready during re-ingestion, using structured analysis")
+            summary_en = None
+            summary_ar = None
+        
+        # Fallback to structured analysis if RAG didn't work
+        if not summary_en:
+            if is_financial_document_type(financial_doc_type):
+                # Use financial document analysis for financial documents
+                try:
+                    summary_en = analyze_financial_document(extracted_text, user.department, 'en')
+                    summary_ar = translate_text(summary_en, 'ar')
+                    logger.info(f"Re-generated financial document analysis for {financial_doc_type}: {document.filename}")
+                except Exception as e:
+                    logger.error(f"Financial document analysis error during re-ingestion: {str(e)}")
+                    # Fallback to structured analysis
+                    try:
+                        summary_en = generate_structured_summary(extracted_text, user.department, 'en')
+                        summary_ar = translate_text(summary_en, 'ar')
+                        logger.info(f"Fallback to structured summary during re-ingestion: {document.filename}")
+                    except Exception as e2:
+                        logger.error(f"Structured analysis fallback error during re-ingestion: {str(e2)}")
+                        summary_en = get_document_summary(extracted_text)
+                        if not summary_en or "Hello! I'm your AI assistant" in summary_en or len(summary_en.strip()) < 50:
+                            words = extracted_text.split()
+                            word_count = len(words)
+                            sentences = extracted_text.split('.')[:3]
+                            key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+                            key_content = '. '.join(key_sentences[:2])
+                            if key_content:
+                                summary_en = f"Financial Document Summary: This {user.department} department financial document ({word_count} words) contains information about: {key_content}..."
+                            else:
+                                summary_en = f"Financial Document Summary: This {user.department} department financial document contains {word_count} words of financial information. Key topics include: {', '.join(words[:15])}..."
+                        
+                        # Translate English summary to Arabic
+                        try:
+                            summary_ar = translate_text(summary_en, 'ar')
+                        except:
+                            summary_ar = f"ملخص المستند المالي: تم تحليل مستند مالي من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية."
+            else:
+                # Use structured analysis for non-financial documents
                 try:
                     summary_en = generate_structured_summary(extracted_text, user.department, 'en')
-                    summary_ar = generate_structured_summary(extracted_text, user.department, 'ar')
-                    logger.info(f"Fallback to structured summary during re-ingestion: {document.filename}")
-                except Exception as e2:
-                    logger.error(f"Structured analysis fallback error during re-ingestion: {str(e2)}")
+                    summary_ar = translate_text(summary_en, 'ar')
+                    logger.info(f"Re-generated structured summary for non-financial document: {document.filename}")
+                except Exception as e:
+                    logger.error(f"Structured analysis error during re-ingestion: {str(e)}")
+                    # Fallback to regular summary
                     summary_en = get_document_summary(extracted_text)
                     if not summary_en or "Hello! I'm your AI assistant" in summary_en or len(summary_en.strip()) < 50:
                         words = extracted_text.split()
@@ -470,20 +646,20 @@ def reingest_document():
                         key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
                         key_content = '. '.join(key_sentences[:2])
                         if key_content:
-                            summary_en = f"Financial Document Summary: This {user.department} department financial document ({word_count} words) contains information about: {key_content}..."
+                            summary_en = f"Document Summary: This {user.department} department document ({word_count} words) contains information about: {key_content}..."
                         else:
-                            summary_en = f"Financial Document Summary: This {user.department} department financial document contains {word_count} words of financial information. Key topics include: {', '.join(words[:15])}..."
+                            summary_en = f"Document Summary: This {user.department} department document contains {word_count} words of information. Key topics include: {', '.join(words[:15])}..."
                     
-                    # Generate Arabic summary using local fallback
+                    # Translate English summary to Arabic
                     try:
-                        summary_ar = f"ملخص المستند المالي: هذا المستند المالي من قسم {user.department} ({word_count} كلمة) يحتوي على معلومات حول: {key_content[:100]}..." if key_content else f"ملخص المستند المالي: هذا المستند المالي من قسم {user.department} يحتوي على {word_count} كلمة من المعلومات المالية. الموضوعات الرئيسية تشمل: {', '.join(words[:10])}..."
+                        summary_ar = translate_text(summary_en, 'ar')
                     except:
-                        summary_ar = f"ملخص المستند المالي: تم تحليل مستند مالي من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية."
+                        summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة."
         elif is_pdf_document(document.filename):
             # Use structured analysis for non-financial PDF documents
             try:
                 summary_en = generate_structured_summary(extracted_text, user.department, 'en')
-                summary_ar = generate_structured_summary(extracted_text, user.department, 'ar')
+                summary_ar = translate_text(summary_en, 'ar')
                 logger.info(f"Re-generated structured summary for PDF: {document.filename}")
             except Exception as e:
                 logger.error(f"Structured analysis error during re-ingestion: {str(e)}")
@@ -499,16 +675,16 @@ def reingest_document():
                     else:
                         summary_en = f"Document Summary: This {user.department} department document contains {word_count} words of financial and policy information. Key topics include: {', '.join(words[:15])}..."
                 
-                # Generate Arabic summary using local fallback
+                # Translate English summary to Arabic
                 try:
-                    summary_ar = f"ملخص المستند: هذا المستند من قسم {user.department} ({word_count} كلمة) يحتوي على معلومات حول: {key_content[:100]}..." if key_content else f"ملخص المستند: هذا المستند من قسم {user.department} يحتوي على {word_count} كلمة من المعلومات المالية والسياسية. الموضوعات الرئيسية تشمل: {', '.join(words[:10])}..."
+                    summary_ar = translate_text(summary_en, 'ar')
                 except:
                     summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية والسياسات."
         else:
             # Use regular summary for non-PDF, non-financial documents
             try:
                 summary_en = query_gemini(f"Please provide a concise summary of this {user.department} department document:\n\n{extracted_text[:2000]}", user.department, 'en')
-                summary_ar = query_gemini(f"Please provide a concise summary of this {user.department} department document:\n\n{extracted_text[:2000]}", user.department, 'ar')
+                summary_ar = translate_text(summary_en, 'ar')
                 # Check if we got a generic response
                 if "Hello! I'm your AI assistant" in summary_en or "How can I assist you today" in summary_en:
                     raise Exception("Got generic response from Gemini")
@@ -527,9 +703,9 @@ def reingest_document():
                     else:
                         summary_en = f"Document Summary: This {user.department} department document contains {word_count} words of financial and policy information. Key topics include: {', '.join(words[:15])}..."
                 
-                # Generate Arabic summary using local fallback
+                # Translate English summary to Arabic
                 try:
-                    summary_ar = f"ملخص المستند: هذا المستند من قسم {user.department} ({word_count} كلمة) يحتوي على معلومات حول: {key_content[:100]}..." if key_content else f"ملخص المستند: هذا المستند من قسم {user.department} يحتوي على {word_count} كلمة من المعلومات المالية والسياسية. الموضوعات الرئيسية تشمل: {', '.join(words[:10])}..."
+                    summary_ar = translate_text(summary_en, 'ar')
                 except:
                     summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية والسياسات."
         
@@ -592,7 +768,8 @@ def chat():
             # Try RAG system if FAQ didn't provide a response
             if not response and rag_system and rag_system.is_ready():
                 try:
-                    rag_response, rag_response_en = query_rag(message, language)
+                    # Use the RAG prompt template for context-based answers
+                    rag_response, rag_response_en = query_rag(message, language, user.department)
                     if rag_response and rag_response.strip() and not rag_response.startswith("RAG system not"):
                         response = rag_response
                         logger.info(f"Using RAG response for query: '{message}'")
@@ -638,7 +815,7 @@ def chat():
                             else:
                                 response = f"Hello! I'm your AI assistant for the {user.department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
             
-            # Save assistant response to database
+            # Save assistant response to database (no masking for chat)
             assistant_message = ChatMessage(
                 user_id=user.id,
                 type='assistant',

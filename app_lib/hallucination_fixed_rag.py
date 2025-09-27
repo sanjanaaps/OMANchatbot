@@ -13,12 +13,17 @@ from deep_translator import GoogleTranslator
 from transformers import pipeline, AutoTokenizer, AutoModelForCausalLM
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
+from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.llms import HuggingFacePipeline
+from langchain_community.llms import HuggingFacePipeline
 from langchain_huggingface import HuggingFaceEmbeddings
 import logging
+import warnings
+
+# Suppress PDF processing warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='pdfminer')
+warnings.filterwarnings('ignore', message='.*Cannot set gray stroke color.*')
 
 logger = logging.getLogger(__name__)
 
@@ -76,20 +81,24 @@ class DocumentProcessor:
         return translated_text
 
     def process_document(self, filepath, filetype='pdf'):
-        text = ""
-        if filetype == 'pdf':
-            text = self.extract_text_from_pdf(filepath)
-        elif filetype == 'txt':
-            text = self.extract_text_from_txt(filepath)
-        elif filetype == 'md':
-            text = self.extract_text_from_md(filepath)
-        else:
-            raise ValueError(f"Unsupported file type: {filetype}")
+        try:
+            text = ""
+            if filetype == 'pdf':
+                text = self.extract_text_from_pdf(filepath)
+            elif filetype == 'txt':
+                text = self.extract_text_from_txt(filepath)
+            elif filetype == 'md':
+                text = self.extract_text_from_md(filepath)
+            else:
+                raise ValueError(f"Unsupported file type: {filetype}")
 
-        text_en = self.translate_text_in_chunks(text, dest='en')
-        summary_en = "Summarization disabled"
-        summary_ar = "Summarization disabled"
-        return text, text_en, summary_en, summary_ar
+            text_en = self.translate_text_in_chunks(text, dest='en')
+            summary_en = "Summarization disabled"
+            summary_ar = "Summarization disabled"
+            return text, text_en, summary_en, summary_ar
+        except Exception as e:
+            logger.warning(f"Error processing document {filepath}: {str(e)}")
+            return "", "", "Error processing document", "خطأ في معالجة المستند"
 
 
 class DepartmentTagger:
@@ -140,25 +149,11 @@ def get_llm():
         return None, None
 
 
-# Prompt Template for Document Summarizer
-prompt_template = """You are an assistant for the Oman Central Bank. You must follow these rules strictly:
+# Import prompt template from the centralized module
+from app_lib.prompt_templates import RAG_PROMPT_TEMPLATE
 
-RULES:
-1. Use ONLY the information provided in the Context section below
-2. If the exact answer is not found in the Context, respond with "I don't have that specific information available"
-3. Do NOT add any information from your general knowledge
-4. Do NOT make assumptions or inferences beyond what is explicitly stated
-5. Quote directly from the context when possible
-
-Context: {context}
-
-Question: {question}
-
-Instructions: Read the context carefully and provide an answer using ONLY the information above. If you cannot find the answer in the context, say "I don't have that specific information available."
-
-Answer:"""
-
-prompt = PromptTemplate(input_variables=["context", "question"], template=prompt_template)
+# Use the centralized prompt template
+prompt = PromptTemplate(input_variables=["context", "question"], template=RAG_PROMPT_TEMPLATE)
 
 
 class HallucinationFixedRAG:
@@ -234,7 +229,7 @@ class HallucinationFixedRAG:
                         ))
                         
                 except Exception as e:
-                    logger.error(f"Error processing file {filename}: {str(e)}")
+                    logger.warning(f"Error processing file {filename}: {str(e)} - skipping this file")
                     continue
 
         # Process additional files outside the zip (Q&A format)
@@ -456,17 +451,22 @@ if __name__ == "__main__":
 
 
 # Initialize the RAG system
-def initialize_hallucination_fixed_rag(upload_folder):
+def initialize_hallucination_fixed_rag(upload_folder, ingest_documents=False):
     """Initialize the Hallucination Fixed RAG system"""
     try:
         rag = HallucinationFixedRAG(upload_folder)
-        success = rag.ingest_documents(upload_folder)
-        if success:
-            logger.info("✅ Hallucination Fixed RAG system initialized successfully")
-            return rag
+        
+        # Only ingest documents if explicitly requested
+        if ingest_documents:
+            success = rag.ingest_documents(upload_folder)
+            if success:
+                logger.info("✅ Hallucination Fixed RAG system initialized successfully with document ingestion")
+            else:
+                logger.warning("⚠️ Hallucination Fixed RAG system initialized but document ingestion failed")
         else:
-            logger.warning("⚠️ Hallucination Fixed RAG system initialized but document ingestion failed")
-            return rag
+            logger.info("✅ Hallucination Fixed RAG system initialized (documents not ingested - use ingest_documents_gpu.py for ingestion)")
+        
+        return rag
     except Exception as e:
         logger.error(f"Failed to initialize Hallucination Fixed RAG system: {str(e)}")
         return None

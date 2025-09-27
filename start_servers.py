@@ -1,91 +1,84 @@
 #!/usr/bin/env python3
 """
-Startup script to run both Flask backend and Node.js API server
+Start both Apache and Flask servers
 """
 
 import subprocess
 import sys
-import time
 import os
-import signal
-from threading import Thread
+import time
+import threading
+from pathlib import Path
 
-def run_flask_server():
-    """Run the Flask backend server"""
-    print("🚀 Starting Flask backend server...")
+def start_flask():
+    """Start Flask application in a separate thread"""
+    print("🐍 Starting Flask application...")
+    os.chdir(Path(__file__).parent)
+    
     try:
-        subprocess.run([sys.executable, "run_app.py"], check=True)
+        # Start Flask app
+        subprocess.run([sys.executable, "app.py"], check=True)
     except subprocess.CalledProcessError as e:
-        print(f"❌ Flask server failed: {e}")
+        print(f"❌ Flask application failed to start: {e}")
     except KeyboardInterrupt:
-        print("🛑 Flask server stopped")
+        print("🛑 Flask application stopped")
 
-def run_node_server():
-    """Run the Node.js API server"""
-    print("🚀 Starting Node.js API server...")
+def start_apache():
+    """Start Apache server"""
+    print("🚀 Starting Apache server...")
+    
     try:
-        # Check if node_modules exists, if not install dependencies
-        if not os.path.exists("node_modules"):
-            print("📦 Installing Node.js dependencies...")
-            subprocess.run(["npm", "install"], check=True)
-        
-        subprocess.run(["node", "server.js"], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Node.js server failed: {e}")
-    except KeyboardInterrupt:
-        print("🛑 Node.js server stopped")
-
-def run_react_frontend():
-    """Run the React frontend development server"""
-    print("🚀 Starting React frontend server...")
-    try:
-        # Check if frontend node_modules exists, if not install dependencies
-        if not os.path.exists("frontend/node_modules"):
-            print("📦 Installing React dependencies...")
-            subprocess.run(["npm", "install"], cwd="frontend", check=True)
-        
-        subprocess.run(["npm", "start"], cwd="frontend", check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ React frontend failed: {e}")
-    except KeyboardInterrupt:
-        print("🛑 React frontend stopped")
+        # Try to start Apache service
+        subprocess.run(["net", "start", "Apache2.4"], check=True)
+        print("✅ Apache started successfully!")
+    except subprocess.CalledProcessError:
+        try:
+            # Try alternative method
+            subprocess.run(["httpd", "-k", "start"], check=True)
+            print("✅ Apache started successfully!")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Failed to start Apache: {e}")
+            print("Please make sure Apache is installed and configured")
 
 def main():
-    """Main function to start all servers"""
-    print("🎯 Starting Central Bank of Oman Chatbot System")
-    print("=" * 60)
+    print("🎯 Starting CBO Flask Application with Apache")
+    print("=" * 50)
     
-    # Start Flask backend in a separate thread
-    flask_thread = Thread(target=run_flask_server, daemon=True)
+    # Start Apache
+    start_apache()
+    
+    # Wait a moment for Apache to start
+    time.sleep(2)
+    
+    # Start Flask in a separate thread
+    flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()
     
-    # Wait a bit for Flask to start
-    time.sleep(3)
-    
-    # Start Node.js API server in a separate thread
-    node_thread = Thread(target=run_node_server, daemon=True)
-    node_thread.start()
-    
-    # Wait a bit for Node.js to start
-    time.sleep(3)
-    
-    # Start React frontend in a separate thread
-    react_thread = Thread(target=run_react_frontend, daemon=True)
-    react_thread.start()
-    
-    print("\n✅ All servers started!")
-    print("📱 Frontend: http://localhost:3000")
-    print("🔌 API Server: http://localhost:3001")
-    print("🐍 Flask Backend: http://localhost:5000")
-    print("\nPress Ctrl+C to stop all servers")
+    print("\n✅ Servers started!")
+    print("🌐 Your application should now be available at:")
+    print("   http://localhost")
+    print("   http://localhost:80")
+    print("\n📝 Press Ctrl+C to stop all servers")
     
     try:
         # Keep the main thread alive
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 Shutting down all servers...")
-        sys.exit(0)
+        print("\n🛑 Stopping servers...")
+        
+        # Stop Apache
+        try:
+            subprocess.run(["net", "stop", "Apache2.4"], check=True)
+            print("✅ Apache stopped")
+        except subprocess.CalledProcessError:
+            try:
+                subprocess.run(["httpd", "-k", "stop"], check=True)
+                print("✅ Apache stopped")
+            except subprocess.CalledProcessError:
+                print("❌ Failed to stop Apache")
+        
+        print("👋 Goodbye!")
 
 if __name__ == "__main__":
     main()

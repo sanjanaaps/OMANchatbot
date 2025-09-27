@@ -159,7 +159,7 @@ Current query: {prompt}"""
 
 def translate_text(text: str, target_language: str = 'ar') -> str:
     """
-    Translate text using Gemini API
+    Translate text using local GoogleTranslator (no API key required)
     
     Args:
         text: Text to translate
@@ -167,6 +167,36 @@ def translate_text(text: str, target_language: str = 'ar') -> str:
         
     Returns:
         Translated text
+    """
+    if not text or not text.strip():
+        return text
+    
+    try:
+        from deep_translator import GoogleTranslator
+        
+        # Handle large texts by chunking
+        if len(text) > 4000:
+            chunks = chunk_text(text, chunk_size=4000, overlap=200)
+            translated_chunks = []
+            
+            for chunk in chunks:
+                translated_chunk = _translate_chunk_local(chunk, target_language)
+                translated_chunks.append(translated_chunk)
+            
+            return ' '.join(translated_chunks)
+        else:
+            return _translate_chunk_local(text, target_language)
+            
+    except ImportError:
+        logger.warning("deep_translator not available, falling back to Gemini API")
+        return _translate_text_gemini(text, target_language)
+    except Exception as e:
+        logger.warning(f"Local translation failed: {str(e)}, falling back to Gemini API")
+        return _translate_text_gemini(text, target_language)
+
+def _translate_text_gemini(text: str, target_language: str = 'ar') -> str:
+    """
+    Fallback translation using Gemini API (original implementation)
     """
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY environment variable not set")
@@ -186,6 +216,25 @@ def translate_text(text: str, target_language: str = 'ar') -> str:
         return ' '.join(translated_chunks)
     else:
         return _translate_chunk(text, target_language)
+
+def _translate_chunk_local(text: str, target_language: str) -> str:
+    """
+    Translate a chunk of text using local GoogleTranslator
+    """
+    try:
+        from deep_translator import GoogleTranslator
+        
+        if target_language == 'ar':
+            translator = GoogleTranslator(source='auto', target='ar')
+        elif target_language == 'en':
+            translator = GoogleTranslator(source='auto', target='en')
+        else:
+            translator = GoogleTranslator(source='auto', target=target_language)
+        
+        return translator.translate(text)
+    except Exception as e:
+        logger.error(f"Local translation error: {str(e)}")
+        return text  # Return original text if translation fails
 
 def _translate_chunk(text: str, target_language: str) -> str:
     """Translate a single chunk of text"""

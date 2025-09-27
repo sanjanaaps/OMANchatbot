@@ -41,6 +41,52 @@
                         </div>
                     </div>
 
+                    <!-- Document Type Selection -->
+                    <div>
+                        <label for="document_type" class="block text-sm font-medium text-gray-700">
+                            Document Type (Optional)
+                        </label>
+                        <div class="mt-1">
+                            <input type="text" 
+                                   id="document_type" 
+                                   name="document_type" 
+                                   list="document_types"
+                                   placeholder="Type document type (e.g., Bank Statement, Invoice, Report...)"
+                                   class="shadow-sm focus:ring-ocb-blue focus:border-ocb-blue block w-full sm:text-sm border-gray-300 rounded-md">
+                            <datalist id="document_types">
+                                <option value="Bank Statement">
+                                <option value="Payment Receipt">
+                                <option value="Remittance Advice">
+                                <option value="Wire Transfer Confirmation">
+                                <option value="Debit Memo">
+                                <option value="Credit Memo">
+                                <option value="Loan Repayment Schedule">
+                                <option value="Bank Invoice (for Services)">
+                                <option value="Cheque/Check Stub">
+                                <option value="Deposit Slip">
+                                <option value="Bank Draft">
+                                <option value="Overdraft Notice">
+                                <option value="Interest Payment Confirmation">
+                                <option value="Account Transaction Record">
+                                <option value="Bank Fees Statement">
+                                <option value="Statement of Account">
+                                <option value="Letter of Credit">
+                                <option value="Bank Guarantee">
+                                <option value="Credit Card Statement">
+                                <option value="Payment Plan Agreement">
+                                <option value="Financial Report">
+                                <option value="Policy Document">
+                                <option value="Regulatory Document">
+                                <option value="Internal Memo">
+                                <option value="Meeting Minutes">
+                                <option value="Other">
+                            </datalist>
+                        </div>
+                        <p class="mt-1 text-xs text-gray-500">
+                            Specify the document type for better analysis. If left empty, the system will auto-detect the type.
+                        </p>
+                    </div>
+
                     <div class="flex justify-end">
                         <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-ocb-blue hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ocb-blue">
                             <i class="fas fa-upload mr-2"></i>
