@@ -16,8 +16,24 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginTime, setLoginTime] = useState(null);
+  const [lastLogoutTime, setLastLogoutTime] = useState(null);
 
   useEffect(() => {
+    // Load stored timestamps
+    try {
+      const storedLoginTime = localStorage.getItem('loginTime');
+      const storedLastLogoutTime = localStorage.getItem('lastLogoutTime');
+      if (storedLoginTime) {
+        setLoginTime(Number(storedLoginTime));
+      }
+      if (storedLastLogoutTime) {
+        setLastLogoutTime(Number(storedLastLogoutTime));
+      }
+    } catch (e) {
+      // no-op if storage is unavailable
+    }
+
     checkAuthStatus();
   }, []);
 
@@ -48,6 +64,11 @@ export const AuthProvider = ({ children }) => {
       if (response.success) {
         setUser(response.user);
         setIsAuthenticated(true);
+        const now = Date.now();
+        setLoginTime(now);
+        try {
+          localStorage.setItem('loginTime', String(now));
+        } catch (e) {}
         toast.success('Login successful!');
         return { success: true };
       } else {
@@ -65,9 +86,16 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
+      const now = Date.now();
       await authService.logout();
       setUser(null);
       setIsAuthenticated(false);
+      setLastLogoutTime(now);
+      setLoginTime(null);
+      try {
+        localStorage.setItem('lastLogoutTime', String(now));
+        localStorage.removeItem('loginTime');
+      } catch (e) {}
       toast.success('Logged out successfully');
     } catch (error) {
       console.error('Logout error:', error);
@@ -79,6 +107,8 @@ export const AuthProvider = ({ children }) => {
     user,
     loading,
     isAuthenticated,
+    loginTime,
+    lastLogoutTime,
     login,
     logout,
     checkAuthStatus
