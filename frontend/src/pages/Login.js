@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Building2, User, Lock } from 'lucide-react';
 
 const Login = () => {
-  const { login, isAuthenticated, loading } = useAuth();
+  const { login, isAuthenticated, loading, lastLogoutTime } = useAuth();
   const [credentials, setCredentials] = useState({
     username: '',
     password: ''
@@ -60,6 +60,11 @@ const Login = () => {
             Central Bank of Oman AI Chatbot
           </p>
         </div>
+        {lastLogoutTime ? (
+          <p className="text-center text-xs text-gray-500 mt-2">
+            Last logout: {new Date(lastLogoutTime).toLocaleString()}
+          </p>
+        ) : null}
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="rounded-md shadow-sm -space-y-px">

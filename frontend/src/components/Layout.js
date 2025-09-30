@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 
 const Layout = ({ children }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, loginTime } = useAuth();
   const location = useLocation();
 
   const navigation = [
@@ -43,6 +43,11 @@ const Layout = ({ children }) => {
               <span className="text-sm text-gray-700">
                 Welcome, {user?.username || 'User'}
               </span>
+              {loginTime ? (
+                <span className="text-xs text-gray-500">
+                  Logged in: {new Date(loginTime).toLocaleString()}
+                </span>
+              ) : null}
               <button
                 onClick={logout}
                 className="flex items-center space-x-2 text-gray-500 hover:text-gray-700 transition-colors"

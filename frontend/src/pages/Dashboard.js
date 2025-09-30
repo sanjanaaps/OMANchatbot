@@ -4,7 +4,7 @@ import { FileText, MessageSquare, Upload, TrendingUp } from 'lucide-react';
 import api from '../services/api';
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, loginTime } = useAuth();
   const [dashboardData, setDashboardData] = useState({
     docCount: 0,
     recentDocs: []
@@ -65,6 +65,9 @@ const Dashboard = () => {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
         <p className="text-gray-600">Welcome back, {user?.username || 'User'}!</p>
+        {loginTime ? (
+          <p className="text-xs text-gray-500 mt-1">Logged in: {new Date(loginTime).toLocaleString()}</p>
+        ) : null}
       </div>
 
       {/* Stats Grid */}
