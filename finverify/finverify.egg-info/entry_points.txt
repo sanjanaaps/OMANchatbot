@@ -1,0 +1,2 @@
+[console_scripts]
+finverify = finverify.cli:main
