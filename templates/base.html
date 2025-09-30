@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Oman Central Bank - Document Analyzer{% endblock %}</title>
+    <title>{% block title %}Central Bank of Oman - Document Analyzer{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=@tailwindcss/typography"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -28,7 +29,7 @@
                     <div class="flex-shrink-0">
                         <h1 class="text-xl font-bold">
                             <i class="fas fa-university mr-2"></i>
-                            Oman Central Bank
+                            Central Bank of Oman
                         </h1>
                     </div>
                     <div class="hidden md:ml-6 md:flex md:space-x-8">
@@ -94,7 +95,7 @@
     {% endwith %}
 
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+    <main class="{% block main_class %}max-w-7xl mx-auto py-6 sm:px-6 lg:px-8{% endblock %}">
         {% block content %}{% endblock %}
     </main>
 

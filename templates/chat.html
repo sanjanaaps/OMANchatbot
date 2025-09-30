@@ -2,99 +2,150 @@
 
 {% block title %}AI Assistant Chat{% endblock %}
 
+{% block main_class %}{% endblock %}
+
 {% block content %}
-<div class="px-4 py-6 sm:px-0">
-    <div class="max-w-4xl mx-auto">
+<div class="flex h-screen bg-gray-50">
+    <!-- Chat History Sidebar -->
+    <div class="w-80 bg-white shadow-lg border-r border-gray-200 flex flex-col hidden lg:flex">
+        <!-- Sidebar Header -->
+        <div class="p-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900 flex items-center">
+                <i class="fas fa-history text-ocb-blue mr-2"></i>
+                Chat History
+            </h2>
+            <button id="newChatBtn" class="mt-2 w-full bg-ocb-blue text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors">
+                <i class="fas fa-plus mr-2"></i>New Chat
+            </button>
+        </div>
+        
+        <!-- Chat History List -->
+        <div id="chatHistoryList" class="flex-1 overflow-y-auto p-4 space-y-2">
+            <!-- Chat history items will be loaded here -->
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-comments text-2xl mb-2"></i>
+                <p class="text-sm">No chat history yet</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Chat Area -->
+    <div class="flex-1 flex flex-col">
         <!-- Header -->
-        <div class="mb-8">
-            <h1 class="text-3xl font-bold text-gray-900">
-                <i class="fas fa-comments text-ocb-blue mr-3"></i>
-                AI Assistant Chat
-            </h1>
-            <p class="mt-2 text-gray-600">
-                Chat with the AI assistant about your department's documents. The assistant can only access information from your department.
-            </p>
+        <div class="bg-white border-b border-gray-200 px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-900">
+                        <i class="fas fa-comments text-ocb-blue mr-3"></i>
+                        AI Assistant Chat
+                    </h1>
+                    <p class="mt-1 text-gray-600 text-sm">
+                        Chat with the AI assistant about your department's documents
+                    </p>
+                </div>
+                <!-- Mobile Menu Button -->
+                <button id="mobileMenuBtn" class="lg:hidden inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    <i class="fas fa-history mr-2"></i>
+                    History
+                </button>
+            </div>
         </div>
 
-        <!-- Chat Interface -->
-        <div class="bg-white shadow sm:rounded-lg">
-            <div class="px-4 py-5 sm:p-6">
-                <!-- Chat Messages -->
-                <div id="chatMessages" class="space-y-4 mb-6 max-h-96 overflow-y-auto border border-gray-200 rounded-lg p-4">
-                    {% if messages %}
-                        {% for message in messages %}
-                        <div class="flex {% if message.type == 'user' %}justify-end{% else %}justify-start{% endif %}">
-                            <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-lg {% if message.type == 'user' %}bg-ocb-blue text-white{% else %}bg-gray-100 text-gray-800{% endif %}">
-                                {% if message.type == 'assistant' %}
-                                <div class="flex items-center mb-1">
-                                    <i class="fas fa-robot text-ocb-blue mr-2"></i>
-                                    <span class="text-xs font-medium">AI Assistant</span>
-                                </div>
-                                {% endif %}
-                                <p class="text-sm">{{ message.content|safe }}</p>
+        <!-- Chat Messages -->
+        <div class="flex-1 overflow-y-auto p-6">
+            <div id="chatMessages" class="space-y-4 max-w-4xl mx-auto">
+                {% if messages %}
+                    {% for message in messages %}
+                    <div class="flex {% if message.type == 'user' %}justify-end{% else %}justify-start{% endif %}">
+                        <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-lg {% if message.type == 'user' %}bg-ocb-blue text-white{% else %}bg-gray-100 text-gray-800{% endif %}">
+                            {% if message.type == 'assistant' %}
+                            <div class="flex items-center mb-1">
+                                <i class="fas fa-robot text-ocb-blue mr-2"></i>
+                                <span class="text-xs font-medium">AI Assistant</span>
                             </div>
+                            {% endif %}
+                                    <div class="text-sm prose prose-sm max-w-none">{{ message.content|markdown|safe }}</div>
                         </div>
-                        {% endfor %}
-                    {% else %}
-                    <div class="text-center text-gray-500 py-8">
-                        <i class="fas fa-comments text-4xl mb-4"></i>
-                        <p>Start a conversation with the AI assistant</p>
-                        <p class="text-sm mt-2">Ask questions about your department's documents</p>
                     </div>
-                    {% endif %}
+                    {% endfor %}
+                {% else %}
+                <div class="text-center text-gray-500 py-12">
+                    <i class="fas fa-comments text-4xl mb-4"></i>
+                    <p class="text-lg">Start a conversation with the AI assistant</p>
+                    <p class="text-sm mt-2">Ask questions about your department's documents</p>
                 </div>
+                {% endif %}
+            </div>
+        </div>
 
-                <!-- Chat Input Form -->
-                <form method="POST" class="space-y-4">
-                    <!-- Audio Recording -->
-                    <div class="border border-gray-200 rounded-lg p-4">
-                        <div class="flex items-center justify-between mb-3">
+        <!-- Chat Input Area -->
+        <div class="bg-white border-t border-gray-200 p-6">
+            <form method="POST" id="chatForm" class="max-w-4xl mx-auto space-y-4">
+                <!-- File Upload Area -->
+                <div id="fileUploadArea" class="hidden">
+                    <div class="border border-gray-300 border-dashed rounded-lg p-4">
+                        <div class="flex items-center justify-between">
                             <div class="flex items-center space-x-2">
-                                <!-- Fixed initial button styling -->
-                                <button type="button" id="recordBtn" onclick="toggleRecording()" 
-                                        class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 transition-colors duration-200">
-                                    <i class="fas fa-microphone mr-2" id="recordIcon"></i>
-                                    <span id="recordBtnLabel">Start Recording</span>
-                                </button>
-                                <span id="recordTimer" class="text-sm text-gray-600 font-mono">00:00 / 01:00</span>
-                                <div id="recordingStatus" class="text-xs text-gray-500"></div>
+                                <i class="fas fa-file text-gray-400"></i>
+                                <span class="text-sm text-gray-600" id="uploadedFileName">No file selected</span>
                             </div>
-                            <div class="text-xs text-gray-500">Max 1 minute</div>
-                        </div>
-                        <div class="mb-3">
-                            <!-- Fixed canvas with proper sizing -->
-                            <canvas id="waveformCanvas" width="600" height="64" 
-                                    class="w-full bg-gray-50 border border-gray-200 rounded" 
-                                    style="height: 64px;"></canvas>
-                        </div>
-                        <div>
-                            <label for="liveTranscript" class="block text-sm font-medium text-gray-700 mb-1">Live Transcription</label>
-                            <textarea id="liveTranscript" rows="2" 
-                                      class="shadow-sm focus:ring-ocb-blue focus:border-ocb-blue block w-full sm:text-sm border-gray-300 rounded-md" 
-                                      placeholder="Transcribed words will appear here in real time..." readonly></textarea>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <div class="flex-1">
-                            <label for="message" class="sr-only">Message</label>
-                            <textarea name="message" id="message" rows="2" 
-                                      class="shadow-sm focus:ring-ocb-blue focus:border-ocb-blue block w-full sm:text-sm border-gray-300 rounded-md"
-                                      placeholder="Ask a question about your department's documents or use the microphone above..."
-                                      required></textarea>
-                        </div>
-                        <div class="flex flex-col space-y-2">
-                            <select name="language" id="language" class="block w-32 pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-ocb-blue focus:border-ocb-blue sm:text-sm rounded-md">
-                                <option value="en">English</option>
-                                <option value="ar">العربية</option>
-                            </select>
-                            <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-ocb-blue hover:bg-blue-700 transition-colors duration-200">
-                                <i class="fas fa-paper-plane mr-2"></i>
-                                Send
+                            <button type="button" id="removeFileBtn" class="text-red-500 hover:text-red-700 text-sm">
+                                <i class="fas fa-times"></i>
                             </button>
                         </div>
                     </div>
-                </form>
-            </div>
+                </div>
+
+                <!-- Compact Audio Recording -->
+                <div class="flex items-center justify-center">
+                    <button type="button" id="recordBtn" onclick="toggleRecording()" 
+                            class="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors duration-200">
+                        <i class="fas fa-microphone text-red-600 mr-2" id="recordIcon"></i>
+                        <span id="recordBtnLabel">Record</span>
+                    </button>
+                    <span id="recordTimer" class="ml-2 text-sm text-gray-600 font-mono">00:00 / 01:00</span>
+                    <div id="recordingStatus" class="ml-2 text-xs text-gray-500"></div>
+                </div>
+
+                <!-- Compact Waveform (only show when recording) -->
+                <div id="waveformContainer" class="hidden">
+                    <canvas id="waveformCanvas" width="600" height="32" 
+                            class="w-full bg-gray-50 border border-gray-200 rounded" 
+                            style="height: 32px;"></canvas>
+                </div>
+
+
+                <!-- Message Input -->
+                <div class="flex items-end space-x-4">
+                    <!-- File Upload Button -->
+                    <button type="button" id="uploadBtn" class="flex-shrink-0 inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors">
+                        <i class="fas fa-paperclip mr-2"></i>
+                        Upload
+                    </button>
+                    <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.tiff" class="hidden">
+                    
+                    <!-- Message Input -->
+                    <div class="flex-1">
+                        <label for="message" class="sr-only">Message</label>
+                        <textarea name="message" id="message" rows="2" 
+                                  class="shadow-sm focus:ring-ocb-blue focus:border-ocb-blue block w-full sm:text-sm border-gray-300 rounded-md resize-none"
+                                  placeholder="Ask a question about your department's documents..."
+                                  required></textarea>
+                    </div>
+                    
+                    <!-- Language and Send -->
+                    <div class="flex flex-col space-y-2">
+                        <select name="language" id="language" class="block w-24 pl-3 pr-8 py-2 text-base border-gray-300 focus:outline-none focus:ring-ocb-blue focus:border-ocb-blue sm:text-sm rounded-md">
+                            <option value="en">EN</option>
+                            <option value="ar">AR</option>
+                        </select>
+                        <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-ocb-blue hover:bg-blue-700 transition-colors duration-200">
+                            <i class="fas fa-paper-plane mr-2"></i>
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -103,6 +154,8 @@
 {% block scripts %}
 <!-- Include browser audio processor as fallback -->
 <script src="{{ url_for('static', filename='browser_audio_processor.js') }}"></script>
+<!-- Include markdown parser for dynamic content -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 (function() {
     'use strict';
@@ -114,8 +167,217 @@
     const recordTimer = document.getElementById('recordTimer');
     const recordingStatus = document.getElementById('recordingStatus');
     const canvas = document.getElementById('waveformCanvas');
-    const transcriptEl = document.getElementById('liveTranscript');
     const messageTextarea = document.getElementById('message');
+    
+    // New UI elements
+    const waveformContainer = document.getElementById('waveformContainer');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const fileInput = document.getElementById('fileInput');
+    const fileUploadArea = document.getElementById('fileUploadArea');
+    const uploadedFileName = document.getElementById('uploadedFileName');
+    const removeFileBtn = document.getElementById('removeFileBtn');
+    const newChatBtn = document.getElementById('newChatBtn');
+    const chatHistoryList = document.getElementById('chatHistoryList');
+    
+    // File upload functionality
+    let selectedFile = null;
+    
+    uploadBtn.addEventListener('click', () => {
+        fileInput.click();
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            selectedFile = file;
+            uploadedFileName.textContent = file.name;
+            fileUploadArea.classList.remove('hidden');
+        }
+    });
+    
+    removeFileBtn.addEventListener('click', () => {
+        selectedFile = null;
+        fileInput.value = '';
+        fileUploadArea.classList.add('hidden');
+        uploadedFileName.textContent = 'No file selected';
+    });
+    
+    // New chat functionality
+    newChatBtn.addEventListener('click', async () => {
+        try {
+            // Call API to start new chat session
+            const response = await fetch('/api/new-chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            
+            if (response.ok) {
+                // Clear current chat display
+                document.getElementById('chatMessages').innerHTML = `
+                    <div class="text-center text-gray-500 py-12">
+                        <i class="fas fa-comments text-4xl mb-4"></i>
+                        <p class="text-lg">Start a conversation with the AI assistant</p>
+                        <p class="text-sm mt-2">Ask questions about your department's documents</p>
+                    </div>
+                `;
+                
+                // Clear message input
+                messageTextarea.value = '';
+                
+                // Remove selected file
+                removeFileBtn.click();
+                
+                // Load updated chat history
+                loadChatHistory();
+            } else {
+                console.error('Failed to start new chat session');
+            }
+        } catch (error) {
+            console.error('Error starting new chat:', error);
+        }
+    });
+    
+    // Load chat history
+    function loadChatHistory() {
+        fetch('/api/chat-history')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.chats.length > 0) {
+                    chatHistoryList.innerHTML = '';
+                    data.chats.forEach(chat => {
+                        const chatItem = document.createElement('div');
+                        chatItem.className = 'p-3 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors';
+                        chatItem.innerHTML = `
+                            <div class="text-sm font-medium text-gray-900 truncate">${chat.summary || 'Untitled Chat'}</div>
+                            <div class="text-xs text-gray-500 mt-1">${new Date(chat.timestamp).toLocaleDateString()}</div>
+                        `;
+                        chatItem.addEventListener('click', () => loadChat(chat.id));
+                        chatHistoryList.appendChild(chatItem);
+                    });
+                } else {
+                    chatHistoryList.innerHTML = `
+                        <div class="text-center text-gray-500 py-8">
+                            <i class="fas fa-comments text-2xl mb-2"></i>
+                            <p class="text-sm">No chat history yet</p>
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                console.error('Error loading chat history:', error);
+            });
+    }
+    
+    // Load specific chat
+    function loadChat(chatId) {
+        fetch(`/api/chat-history/${chatId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const messagesContainer = document.getElementById('chatMessages');
+                    messagesContainer.innerHTML = '';
+                    
+                    if (data.messages.length > 0) {
+                        data.messages.forEach(message => {
+                            const messageDiv = document.createElement('div');
+                            messageDiv.className = `flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`;
+                            messageDiv.innerHTML = `
+                                <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${message.type === 'user' ? 'bg-ocb-blue text-white' : 'bg-gray-100 text-gray-800'}">
+                                    ${message.type === 'assistant' ? `
+                                        <div class="flex items-center mb-1">
+                                            <i class="fas fa-robot text-ocb-blue mr-2"></i>
+                                            <span class="text-xs font-medium">AI Assistant</span>
+                                        </div>
+                                    ` : ''}
+                                    <div class="text-sm prose prose-sm max-w-none">${marked.parse(message.content)}</div>
+                                </div>
+                            `;
+                            messagesContainer.appendChild(messageDiv);
+                        });
+                    } else {
+                        messagesContainer.innerHTML = `
+                            <div class="text-center text-gray-500 py-12">
+                                <i class="fas fa-comments text-4xl mb-4"></i>
+                                <p class="text-lg">Start a conversation with the AI assistant</p>
+                                <p class="text-sm mt-2">Ask questions about your department's documents</p>
+                            </div>
+                        `;
+                    }
+                    
+                    // Scroll to bottom
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
+            })
+            .catch(error => {
+                console.error('Error loading chat:', error);
+            });
+    }
+    
+    // Load chat history on page load
+    loadChatHistory();
+    
+    // Mobile menu functionality
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const sidebar = document.querySelector('.w-80');
+    
+    if (mobileMenuBtn && sidebar) {
+        mobileMenuBtn.addEventListener('click', () => {
+            sidebar.classList.toggle('hidden');
+            sidebar.classList.toggle('absolute');
+            sidebar.classList.toggle('z-50');
+            sidebar.classList.toggle('lg:flex');
+        });
+    }
+    
+    // Handle form submission with file upload
+    document.getElementById('chatForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const message = messageTextarea.value.trim();
+        const language = document.getElementById('language').value;
+        
+        if (!message && !selectedFile) {
+            alert('Please enter a message or upload a file');
+            return;
+        }
+        
+        // Show loading state
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sending...';
+        submitBtn.disabled = true;
+        
+        try {
+            const formData = new FormData();
+            formData.append('message', message);
+            formData.append('language', language);
+            
+            if (selectedFile) {
+                formData.append('file', selectedFile);
+            }
+            
+            const response = await fetch('/chat', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (response.ok) {
+                // Reload the page to show the new message
+                window.location.reload();
+            } else {
+                throw new Error('Failed to send message');
+            }
+        } catch (error) {
+            console.error('Error sending message:', error);
+            alert('Failed to send message. Please try again.');
+        } finally {
+            // Reset button state
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
+    });
     
     // Initialize fallback audio processor
     let fallbackProcessor = null;
@@ -138,7 +400,7 @@
         console.warn('[voice] toggleRecording called before initialization');
     };
 
-    if (!recordBtn || !recordTimer || !canvas || !transcriptEl) {
+    if (!recordBtn || !recordTimer || !canvas) {
         console.error('[voice] Required elements not found');
         return; // leave the noop toggleRecording in place
     }
@@ -181,17 +443,17 @@
         const dpr = window.devicePixelRatio || 1;
         console.log('[voice] resizeCanvas rect.width=', rect.width, 'dpr=', dpr);
         
-        // Set actual canvas pixel size
+        // Set actual canvas pixel size (compact 32px height)
         canvas.width = Math.max(600, Math.floor(rect.width * dpr));
-        canvas.height = Math.floor(64 * dpr);
+        canvas.height = Math.floor(32 * dpr);
         
         // Reset and scale the drawing context (avoid cumulative scaling)
         canvasCtx.setTransform(1, 0, 0, 1, 0, 0);
         canvasCtx.scale(dpr, dpr);
         
-        // CSS display size
+        // CSS display size (compact)
         canvas.style.width = rect.width + 'px';
-        canvas.style.height = '64px';
+        canvas.style.height = '32px';
         
         clearCanvas();
     }
@@ -206,17 +468,18 @@
             canvasCtx.fillStyle = '#f9fafb';
             canvasCtx.fillRect(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
 
-            // Draw waveform
-            canvasCtx.lineWidth = 2;
+            // Draw waveform (compact version)
+            canvasCtx.lineWidth = 1;
             canvasCtx.strokeStyle = '#1e40af';
             canvasCtx.beginPath();
 
             const sliceWidth = (canvas.width / (window.devicePixelRatio || 1)) / bufferLength;
             let x = 0;
+            const centerY = (canvas.height / (window.devicePixelRatio || 1)) / 2;
 
             for (let i = 0; i < bufferLength; i++) {
                 const v = dataArray[i] / 128.0;
-                const y = (v * (canvas.height / (window.devicePixelRatio || 1))) / 2;
+                const y = centerY + (v * 10); // Smaller amplitude for compact display
 
                 if (i === 0) {
                     canvasCtx.moveTo(x, y);
@@ -227,7 +490,7 @@
                 x += sliceWidth;
             }
 
-            canvasCtx.lineTo(canvas.width / (window.devicePixelRatio || 1), (canvas.height / (window.devicePixelRatio || 1)) / 2);
+            canvasCtx.lineTo(canvas.width / (window.devicePixelRatio || 1), centerY);
             canvasCtx.stroke();
 
             rafId = requestAnimationFrame(drawWaveform);
@@ -238,21 +501,27 @@
 
     function updateButtonState(recording) {
         if (recording) {
-            recordBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
-            recordBtn.classList.add('bg-gray-600', 'hover:bg-gray-700');
-            recordBtnLabel.textContent = 'Stop Recording';
-            recordIcon.classList.remove('fa-microphone');
-            recordIcon.classList.add('fa-stop');
+            recordBtn.classList.remove('border-gray-300', 'text-gray-700', 'bg-white', 'hover:bg-gray-50');
+            recordBtn.classList.add('bg-red-600', 'hover:bg-red-700', 'text-white', 'border-red-600');
+            recordBtnLabel.textContent = 'Stop';
+            recordIcon.classList.remove('fa-microphone', 'text-red-600');
+            recordIcon.classList.add('fa-stop', 'text-white');
             recordingStatus.textContent = 'Recording...';
             recordingStatus.classList.add('text-red-600');
+            
+            // Show waveform container
+            waveformContainer.classList.remove('hidden');
         } else {
-            recordBtn.classList.remove('bg-gray-600', 'hover:bg-gray-700');
-            recordBtn.classList.add('bg-red-600', 'hover:bg-red-700');
-            recordBtnLabel.textContent = 'Start Recording';
-            recordIcon.classList.remove('fa-stop');
-            recordIcon.classList.add('fa-microphone');
+            recordBtn.classList.remove('bg-red-600', 'hover:bg-red-700', 'text-white', 'border-red-600');
+            recordBtn.classList.add('border-gray-300', 'text-gray-700', 'bg-white', 'hover:bg-gray-50');
+            recordBtnLabel.textContent = 'Record';
+            recordIcon.classList.remove('fa-stop', 'text-white');
+            recordIcon.classList.add('fa-microphone', 'text-red-600');
             recordingStatus.textContent = '';
             recordingStatus.classList.remove('text-red-600');
+            
+            // Hide waveform container
+            waveformContainer.classList.add('hidden');
         }
     }
 
@@ -343,7 +612,6 @@
             startTime = Date.now();
             updateButtonState(true);
             
-            transcriptEl.value = '';
             resizeCanvas();
             drawWaveform();
 
@@ -438,7 +706,6 @@
                     if (response.ok) {
                         const result = await response.json();
                         if (result.transcript) {
-                            transcriptEl.value = result.transcript;
                             messageTextarea.value = result.transcript;
                             console.log('[voice] Primary transcription successful:', result.transcript);
                             transcriptionSuccess = true;
@@ -459,7 +726,6 @@
                         const blob = new Blob(recordedChunks, { type: 'audio/webm' });
                         const result = await whisperHandler.processRecordedAudio(blob);
                         if (result.success && result.transcript) {
-                            transcriptEl.value = result.transcript;
                             messageTextarea.value = result.transcript;
                             console.log('[voice] Fallback transcription successful:', result.transcript);
                             transcriptionSuccess = true;

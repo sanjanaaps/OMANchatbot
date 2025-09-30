@@ -91,6 +91,7 @@ class ChatMessage(db.Model):
     language = db.Column(db.String(5), default='en', nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     department = db.Column(db.String(100), nullable=False, index=True)
+    attached_file = db.Column(db.String(255), nullable=True)  # Filename of attached file
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Create indexes for better performance
@@ -111,7 +112,8 @@ class ChatMessage(db.Model):
             'content': self.content,
             'language': self.language,
             'timestamp': self.timestamp.isoformat() if self.timestamp else None,
-            'department': self.department
+            'department': self.department,
+            'attached_file': self.attached_file
         }
 
 def init_database(app):

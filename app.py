@@ -2,7 +2,8 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from werkzeug.utils import secure_filename
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
+import markdown
 
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,10 +31,14 @@ from app_lib.prompt_templates import (
 from app_lib.sensitive_data_masking import mask_sensitive_data, should_mask_for_user, get_masking_info
 from app_lib.voice_service import VoiceRecordingService
 from app_lib.faq_service import get_faq_service
-# Hallucination Fixed RAG integration - conditionally loaded based on user choice
-RAG_ENABLED = True  # Enable by default for hallucination-fixed RAG
+# RAG Integration - conditionally loaded based on user choice
+# Check environment variable set by startup scripts
+RAG_ENABLED = os.getenv('RAG_ENABLED', '1') == '1'  # Default to enabled if not set
 RAG_AVAILABLE = False
 rag_system = None
+
+# Log RAG status at startup
+print(f"[App] RAG_ENABLED={RAG_ENABLED} (from env: {os.getenv('RAG_ENABLED', 'not set')})")
 
 # Dummy functions for when RAG is disabled
 def initialize_rag_system(*args, **kwargs):
@@ -56,6 +61,23 @@ app = Flask(__name__)
 # Load configuration
 config_class = get_config()
 app.config.from_object(config_class)
+
+# Add markdown filter
+@app.template_filter('markdown')
+def markdown_filter(text):
+    """Convert markdown text to HTML or return HTML as-is"""
+    if not text:
+        return ""
+    
+    # Check if text already contains HTML tags
+    if '<p>' in text or '<div>' in text or '<br>' in text or '<h1>' in text:
+        # Text is already HTML, return as-is
+        return text
+    
+    # Convert markdown to HTML
+    md = markdown.Markdown(extensions=['nl2br', 'fenced_code', 'tables', 'codehilite'])
+    html = md.convert(text)
+    return html
 
 # Initialize database
 init_db(app)
@@ -90,18 +112,20 @@ except Exception as e:
 # Voice recording service (singleton)
 voice_service = VoiceRecordingService()
 
-# Initialize Hallucination Fixed RAG based on user choice (set by startup_config.py)
+# Initialize RAG Integration based on user choice (set by startup_config.py)
 def initialize_rag_if_enabled():
-    """Initialize Hallucination Fixed RAG system if it was enabled during startup"""
+    """Initialize RAG Integration system if it was enabled during startup"""
     global RAG_ENABLED, RAG_AVAILABLE, rag_system
+    
+    print(f"[App] initialize_rag_if_enabled called - RAG_ENABLED={RAG_ENABLED}")
     
     if RAG_ENABLED:
         try:
-            from app_lib.hallucination_fixed_rag import (
-                initialize_hallucination_fixed_rag as _init_rag, 
-                get_hallucination_fixed_rag as _get_rag, 
-                add_document_to_hallucination_fixed_rag as _add_doc, 
-                query_hallucination_fixed_rag as _query_rag
+            from app_lib.rag_integration import (
+                initialize_rag_system as _init_rag, 
+                get_rag_system as _get_rag, 
+                add_document_to_rag as _add_doc, 
+                query_rag as _query_rag
             )
             
             # Replace dummy functions with real ones
@@ -111,31 +135,20 @@ def initialize_rag_if_enabled():
             globals()['query_rag'] = _query_rag
             
             RAG_AVAILABLE = True
-            logger.info("Hallucination Fixed RAG integration enabled - initializing...")
+            logger.info("RAG Integration enabled - initializing...")
             
-            # Initialize RAG system without document ingestion (use ingest_documents_gpu.py for ingestion)
-            rag_system = initialize_rag_system(app.config['UPLOAD_FOLDER'], ingest_documents=False)
+            # Initialize RAG system without document ingestion (documents will be indexed individually)
+            rag_system = initialize_rag_system(app.config['UPLOAD_FOLDER'])
             if rag_system:
-                # Try to load existing weights if available and model is loaded
-                weights_path = os.path.join(app.config['UPLOAD_FOLDER'], "falcon_h1_weights.pth")
-                if os.path.exists(weights_path) and rag_system.model:
-                    logger.info(f"Loading existing model weights from {weights_path}")
-                    rag_system.load_weights(weights_path)
-                elif os.path.exists(weights_path) and not rag_system.model:
-                    logger.info(f"Weights file exists but no model loaded (GPU not available)")
-                
                 if rag_system.is_ready():
-                    if rag_system.model:
-                        logger.info("✅ Hallucination Fixed RAG system initialized successfully with Falcon model")
-                    else:
-                        logger.info("✅ Hallucination Fixed RAG system initialized successfully (Gemini fallback mode)")
+                    logger.info("✅ RAG Integration system initialized successfully")
                 else:
-                    logger.warning("⚠️ Hallucination Fixed RAG system initialized but not ready - will use Gemini fallback")
+                    logger.warning("⚠️ RAG Integration system initialized but not ready - will use Gemini fallback")
             else:
-                logger.warning("⚠️ Hallucination Fixed RAG system failed to initialize - will use Gemini fallback")
+                logger.warning("⚠️ RAG Integration system failed to initialize - will use Gemini fallback")
                 
         except Exception as e:
-            logger.error(f"Failed to initialize Hallucination Fixed RAG system: {str(e)}")
+            logger.error(f"Failed to initialize RAG Integration system: {str(e)}")
             RAG_AVAILABLE = False
     else:
         logger.info("📝 RAG functionality disabled - running without RAG")
@@ -202,6 +215,8 @@ def login():
         session['username'] = user.username
         session['department'] = user.department
         
+        logger.info(f"🔐 Login: {user.username} ({user.department}) - Session started")
+        
         flash(f'Welcome back, {user.username}!', 'success')
         return redirect(url_for('dashboard'))
     
@@ -210,7 +225,17 @@ def login():
 
 @app.route('/logout')
 def logout():
+    # Log logout information
+    username = session.get('username', 'Unknown')
+    department = session.get('department', 'Unknown')
+    chat_messages_count = len(session.get('chat_messages', []))
+    chat_history_count = len(session.get('chat_history', []))
+    
+    # Clear all session data including chat history
     session.clear()
+    
+    logger.info(f"🚪 Logout: {username} ({department}) - Cleared {chat_messages_count} messages and {chat_history_count} chat histories")
+    
     flash('You have been logged out', 'info')
     return redirect(url_for('index'))
 
@@ -296,172 +321,89 @@ def upload():
                 # Add document to RAG system (optional - won't break upload if RAG fails)
                 try:
                     if rag_system and rag_system.is_ready():
+                        logger.info(f"🔧 RAG: Attempting to ingest document into RAG system: {filename}")
                         success = add_document_to_rag(filepath, filename, user.department)
                         if success:
-                            logger.info(f"Document {filename} added to RAG system")
+                            logger.info(f"✅ RAG: Document {filename} successfully added to RAG system")
                         else:
-                            logger.warning(f"Failed to add document {filename} to RAG system")
+                            logger.warning(f"❌ RAG: Failed to add document {filename} to RAG system")
                     else:
-                        logger.info(f"RAG system not ready, document {filename} saved but not indexed")
+                        logger.info(f"⚠️ RAG: System not ready, document {filename} saved but not indexed")
                 except Exception as e:
-                    logger.warning(f"RAG system error (non-critical): {str(e)}")
+                    logger.warning(f"❌ RAG: System error (non-critical): {str(e)}")
                 
                 # Generate appropriate analysis based on detected document type
                 summary_ar = None  # Initialize Arabic summary
                 
-                # Try RAG system first for document summarization
+                # Use RAG system for document summarization (primary method)
+                summary = None
+                summary_ar = None
+                
+                logger.info(f"📄 Starting document analysis for: {filename}")
+                logger.info(f"📊 Document type: {financial_doc_type}")
+                logger.info(f"📏 Document size: {len(extracted_text)} characters")
+                logger.info(f"🏢 Department: {user.department}")
+                
                 if rag_system and rag_system.is_ready():
                     try:
                         # Use RAG system to generate summary using the appropriate prompt template
+                        logger.info(f"🤖 RAG system is ready, generating summary...")
+                        
                         if is_financial_document_type(financial_doc_type):
                             # Use financial document analysis prompt
+                            prompt_template = get_prompt_template(financial_doc_type, "financial")
+                            logger.info(f"📋 Using financial document prompt template for: {financial_doc_type}")
                             prompt = format_prompt_template(
-                                get_prompt_template(financial_doc_type, "financial"),
+                                prompt_template,
                                 document_content=extracted_text[:2000]
                             )
                         else:
                             # Use general document analysis prompt
+                            prompt_template = get_prompt_template(financial_doc_type, "general")
+                            logger.info(f"📋 Using general document prompt template for: {financial_doc_type}")
                             prompt = format_prompt_template(
-                                get_prompt_template(financial_doc_type, "general"),
+                                prompt_template,
                                 document_content=extracted_text[:2000]
                             )
                         
+                        logger.info(f"🔍 Sending prompt to RAG system (length: {len(prompt)} chars)")
+                        logger.debug(f"📝 Prompt preview: {prompt[:200]}...")
+                        
                         rag_summary, rag_summary_en = query_rag(prompt, 'en', user.department)
+                        logger.info(f"📤 RAG system response received (length: {len(rag_summary) if rag_summary else 0} chars)")
+                        
                         # Translate English summary to Arabic instead of generating separately
+                        logger.info(f"🌐 Translating summary to Arabic...")
                         rag_summary_ar = translate_text(rag_summary, 'ar')
+                        logger.info(f"✅ Arabic translation completed")
                         
                         if rag_summary and not rag_summary.startswith("RAG system not") and len(rag_summary.strip()) > 50:
                             summary = rag_summary
                             summary_ar = rag_summary_ar
-                            logger.info(f"Generated RAG-based summary for: {filename} (type: {financial_doc_type})")
+                            logger.info(f"✅ SUCCESS: Generated RAG-based summary for: {filename} (type: {financial_doc_type})")
+                            logger.info(f"📊 Summary length: EN={len(summary)} chars, AR={len(summary_ar)} chars")
+                            logger.debug(f"📝 Summary preview: {summary[:150]}...")
                         else:
                             raise Exception("RAG system returned invalid response")
                     except Exception as e:
-                        logger.warning(f"RAG summarization failed: {str(e)}, falling back to structured analysis")
-                        # Fallback to structured analysis
+                        logger.error(f"❌ RAG summarization failed: {str(e)}")
+                        logger.warning(f"⚠️ Structured analysis is disabled, using basic fallback")
                         summary = None
                         summary_ar = None
                 else:
-                    logger.info("RAG system not ready, using structured analysis")
+                    logger.warning(f"⚠️ RAG system not ready")
+                    logger.warning(f"⚠️ Structured analysis is disabled, using basic fallback")
                     summary = None
                     summary_ar = None
                 
-                # Fallback to structured analysis if RAG didn't work
+                # RAG-only mode - no fallback summaries
                 if not summary:
-                    if is_financial_document_type(financial_doc_type):
-                        # Use financial document analysis for financial documents
-                        try:
-                            summary = analyze_financial_document(extracted_text, user.department, 'en')
-                            summary_ar = translate_text(summary, 'ar')
-                            logger.info(f"Generated financial document analysis for {financial_doc_type}: {filename}")
-                        except Exception as e:
-                            logger.error(f"Financial document analysis error: {str(e)}")
-                            # Fallback to structured analysis
-                            try:
-                                summary = generate_structured_summary(extracted_text, user.department, 'en')
-                                summary_ar = translate_text(summary, 'ar')
-                                logger.info(f"Fallback to structured summary for: {filename}")
-                            except Exception as e2:
-                                logger.error(f"Structured analysis fallback error: {str(e2)}")
-                                summary = get_document_summary(extracted_text)
-                                if not summary or "Hello! I'm your AI assistant" in summary or len(summary.strip()) < 50:
-                                    words = extracted_text.split()
-                                    word_count = len(words)
-                                    sentences = extracted_text.split('.')[:3]
-                                    key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-                                    key_content = '. '.join(key_sentences[:2])
-                                    if key_content:
-                                        summary = f"Financial Document Summary: This {user.department} department financial document ({word_count} words) contains information about: {key_content}..."
-                                    else:
-                                        summary = f"Financial Document Summary: This {user.department} department financial document contains {word_count} words of financial information. Key topics include: {', '.join(words[:15])}..."
-                                
-                                # Translate English summary to Arabic
-                                try:
-                                    summary_ar = translate_text(summary, 'ar')
-                                except:
-                                    summary_ar = f"ملخص المستند المالي: تم تحليل مستند مالي من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية."
-                    else:
-                        # Use structured analysis for non-financial documents
-                        try:
-                            summary = generate_structured_summary(extracted_text, user.department, 'en')
-                            summary_ar = translate_text(summary, 'ar')
-                            logger.info(f"Generated structured summary for non-financial document: {filename}")
-                        except Exception as e:
-                            logger.error(f"Structured analysis error: {str(e)}")
-                            # Fallback to regular summary
-                            summary = get_document_summary(extracted_text)
-                            if not summary or "Hello! I'm your AI assistant" in summary or len(summary.strip()) < 50:
-                                words = extracted_text.split()
-                                word_count = len(words)
-                                sentences = extracted_text.split('.')[:3]
-                                key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-                                key_content = '. '.join(key_sentences[:2])
-                                if key_content:
-                                    summary = f"Document Summary: This {user.department} department document ({word_count} words) contains information about: {key_content}..."
-                                else:
-                                    summary = f"Document Summary: This {user.department} department document contains {word_count} words of information. Key topics include: {', '.join(words[:15])}..."
-                            
-                            # Translate English summary to Arabic
-                            try:
-                                summary_ar = translate_text(summary, 'ar')
-                            except:
-                                summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة."
-                elif is_pdf_document(filename):
-                    # Use structured analysis for non-financial PDF documents
-                    try:
-                        summary = generate_structured_summary(extracted_text, user.department, 'en')
-                        summary_ar = translate_text(summary, 'ar')
-                        logger.info(f"Generated structured summary for PDF: {filename}")
-                    except Exception as e:
-                        logger.error(f"Structured analysis error: {str(e)}")
-                        # Fallback to regular summary with both languages
-                        summary = get_document_summary(extracted_text)
-                        if not summary or len(summary.strip()) < 50:
-                            words = extracted_text.split()
-                            word_count = len(words)
-                            sentences = extracted_text.split('.')[:3]
-                            key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-                            key_content = '. '.join(key_sentences[:2])
-                            if key_content:
-                                summary = f"Document Summary: This {user.department} department document ({word_count} words) contains information about: {key_content}..."
-                            else:
-                                summary = f"Document Summary: This {user.department} department document contains {word_count} words of financial and policy information. Key topics include: {', '.join(words[:15])}..."
-                        
-                        # Translate English summary to Arabic
-                        try:
-                            summary_ar = translate_text(summary, 'ar')
-                        except:
-                            summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية والسياسات."
-                else:
-                    # Use regular summary for non-PDF, non-financial documents
-                    try:
-                        summary = query_gemini(f"Please provide a concise summary of this {user.department} department document:\n\n{extracted_text[:2000]}", user.department, 'en')
-                        summary_ar = translate_text(summary, 'ar')
-                        # Check if we got a generic response
-                        if "Hello! I'm your AI assistant" in summary or "How can I assist you today" in summary:
-                            raise Exception("Got generic response from Gemini")
-                    except Exception as e:
-                        logger.error(f"Gemini summary error: {str(e)}")
-                        # Fallback to local summary with both languages
-                        summary = get_document_summary(extracted_text)
-                        if not summary or "Hello! I'm your AI assistant" in summary or len(summary.strip()) < 50:
-                            # Create a meaningful summary from the document content
-                            words = extracted_text.split()
-                            word_count = len(words)
-                            # Get first few sentences or key phrases
-                            sentences = extracted_text.split('.')[:3]
-                            key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-                            key_content = '. '.join(key_sentences[:2])
-                            if key_content:
-                                summary = f"Document Summary: This {user.department} department document ({word_count} words) contains information about: {key_content}..."
-                            else:
-                                summary = f"Document Summary: This {user.department} department document contains {word_count} words of financial and policy information. Key topics include: {', '.join(words[:15])}..."
-                        
-                        # Translate English summary to Arabic
-                        try:
-                            summary_ar = translate_text(summary, 'ar')
-                        except:
-                            summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية والسياسات."
+                    logger.error(f"❌ RAG system failed to generate summary for: {filename}")
+                    logger.warning(f"⚠️ Basic summary fallback is disabled - only RAG summaries are allowed")
+                    
+                    # Set minimal summary indicating RAG failure
+                    summary = f"Document uploaded successfully but RAG summary generation failed. Document type: {financial_doc_type}"
+                    summary_ar = f"تم رفع المستند بنجاح ولكن فشل في إنشاء ملخص RAG. نوع المستند: {financial_doc_type}"
                 
                 # Update document with summaries
                 result.summary = summary
@@ -558,156 +500,74 @@ def reingest_document():
         summary_en = None
         summary_ar = None
         
+        logger.info(f"🔄 Starting document re-ingestion for: {document.filename}")
+        logger.info(f"📊 Document type: {financial_doc_type}")
+        logger.info(f"📏 Document size: {len(extracted_text)} characters")
+        logger.info(f"🏢 Department: {user.department}")
+        
         # Try RAG system first for document summarization
         if rag_system and rag_system.is_ready():
             try:
                 # Use RAG system to generate summary using the appropriate prompt template
+                logger.info(f"🤖 RAG system is ready for re-ingestion, generating summary...")
+                
                 if is_financial_document_type(financial_doc_type):
                     # Use financial document analysis prompt
+                    prompt_template = get_prompt_template(financial_doc_type, "financial")
+                    logger.info(f"📋 Using financial document prompt template for re-ingestion: {financial_doc_type}")
                     prompt = format_prompt_template(
-                        get_prompt_template(financial_doc_type, "financial"),
+                        prompt_template,
                         document_content=extracted_text[:2000]
                     )
                 else:
                     # Use general document analysis prompt
+                    prompt_template = get_prompt_template(financial_doc_type, "general")
+                    logger.info(f"📋 Using general document prompt template for re-ingestion: {financial_doc_type}")
                     prompt = format_prompt_template(
-                        get_prompt_template(financial_doc_type, "general"),
+                        prompt_template,
                         document_content=extracted_text[:2000]
                     )
                 
+                logger.info(f"🔍 Sending prompt to RAG system for re-ingestion (length: {len(prompt)} chars)")
+                logger.debug(f"📝 Re-ingestion prompt preview: {prompt[:200]}...")
+                
                 rag_summary, rag_summary_en = query_rag(prompt, 'en', user.department)
+                logger.info(f"📤 RAG system response received for re-ingestion (length: {len(rag_summary) if rag_summary else 0} chars)")
+                
                 # Translate English summary to Arabic instead of generating separately
+                logger.info(f"🌐 Translating re-ingestion summary to Arabic...")
                 rag_summary_ar = translate_text(rag_summary, 'ar')
+                logger.info(f"✅ Arabic translation completed for re-ingestion")
                 
                 if rag_summary and not rag_summary.startswith("RAG system not") and len(rag_summary.strip()) > 50:
                     summary_en = rag_summary
                     summary_ar = rag_summary_ar
-                    logger.info(f"Re-generated RAG-based summary for: {document.filename} (type: {financial_doc_type})")
+                    logger.info(f"✅ SUCCESS: Re-generated RAG-based summary for: {document.filename} (type: {financial_doc_type})")
+                    logger.info(f"📊 Re-ingestion summary length: EN={len(summary_en)} chars, AR={len(summary_ar)} chars")
+                    logger.debug(f"📝 Re-ingestion summary preview: {summary_en[:150]}...")
                 else:
                     raise Exception("RAG system returned invalid response")
             except Exception as e:
-                logger.warning(f"RAG summarization failed during re-ingestion: {str(e)}, falling back to structured analysis")
-                # Fallback to structured analysis
+                logger.error(f"❌ RAG summarization failed during re-ingestion: {str(e)}")
+                logger.warning(f"⚠️ Structured analysis is disabled, using basic fallback for re-ingestion")
+                # Fallback to basic summary
                 summary_en = None
                 summary_ar = None
         else:
-            logger.info("RAG system not ready during re-ingestion, using structured analysis")
+            logger.warning(f"⚠️ RAG system not ready during re-ingestion")
+            logger.warning(f"⚠️ Structured analysis is disabled, using basic fallback for re-ingestion")
             summary_en = None
             summary_ar = None
         
-        # Fallback to structured analysis if RAG didn't work
+        # RAG-only mode - no fallback summaries
         if not summary_en:
-            if is_financial_document_type(financial_doc_type):
-                # Use financial document analysis for financial documents
-                try:
-                    summary_en = analyze_financial_document(extracted_text, user.department, 'en')
-                    summary_ar = translate_text(summary_en, 'ar')
-                    logger.info(f"Re-generated financial document analysis for {financial_doc_type}: {document.filename}")
-                except Exception as e:
-                    logger.error(f"Financial document analysis error during re-ingestion: {str(e)}")
-                    # Fallback to structured analysis
-                    try:
-                        summary_en = generate_structured_summary(extracted_text, user.department, 'en')
-                        summary_ar = translate_text(summary_en, 'ar')
-                        logger.info(f"Fallback to structured summary during re-ingestion: {document.filename}")
-                    except Exception as e2:
-                        logger.error(f"Structured analysis fallback error during re-ingestion: {str(e2)}")
-                        summary_en = get_document_summary(extracted_text)
-                        if not summary_en or "Hello! I'm your AI assistant" in summary_en or len(summary_en.strip()) < 50:
-                            words = extracted_text.split()
-                            word_count = len(words)
-                            sentences = extracted_text.split('.')[:3]
-                            key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-                            key_content = '. '.join(key_sentences[:2])
-                            if key_content:
-                                summary_en = f"Financial Document Summary: This {user.department} department financial document ({word_count} words) contains information about: {key_content}..."
-                            else:
-                                summary_en = f"Financial Document Summary: This {user.department} department financial document contains {word_count} words of financial information. Key topics include: {', '.join(words[:15])}..."
-                        
-                        # Translate English summary to Arabic
-                        try:
-                            summary_ar = translate_text(summary_en, 'ar')
-                        except:
-                            summary_ar = f"ملخص المستند المالي: تم تحليل مستند مالي من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية."
-            else:
-                # Use structured analysis for non-financial documents
-                try:
-                    summary_en = generate_structured_summary(extracted_text, user.department, 'en')
-                    summary_ar = translate_text(summary_en, 'ar')
-                    logger.info(f"Re-generated structured summary for non-financial document: {document.filename}")
-                except Exception as e:
-                    logger.error(f"Structured analysis error during re-ingestion: {str(e)}")
-                    # Fallback to regular summary
-                    summary_en = get_document_summary(extracted_text)
-                    if not summary_en or "Hello! I'm your AI assistant" in summary_en or len(summary_en.strip()) < 50:
-                        words = extracted_text.split()
-                        word_count = len(words)
-                        sentences = extracted_text.split('.')[:3]
-                        key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-                        key_content = '. '.join(key_sentences[:2])
-                        if key_content:
-                            summary_en = f"Document Summary: This {user.department} department document ({word_count} words) contains information about: {key_content}..."
-                        else:
-                            summary_en = f"Document Summary: This {user.department} department document contains {word_count} words of information. Key topics include: {', '.join(words[:15])}..."
-                    
-                    # Translate English summary to Arabic
-                    try:
-                        summary_ar = translate_text(summary_en, 'ar')
-                    except:
-                        summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة."
-        elif is_pdf_document(document.filename):
-            # Use structured analysis for non-financial PDF documents
-            try:
-                summary_en = generate_structured_summary(extracted_text, user.department, 'en')
-                summary_ar = translate_text(summary_en, 'ar')
-                logger.info(f"Re-generated structured summary for PDF: {document.filename}")
-            except Exception as e:
-                logger.error(f"Structured analysis error during re-ingestion: {str(e)}")
-                summary_en = get_document_summary(extracted_text)
-                if not summary_en or len(summary_en.strip()) < 50:
-                    words = extracted_text.split()
-                    word_count = len(words)
-                    sentences = extracted_text.split('.')[:3]
-                    key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-                    key_content = '. '.join(key_sentences[:2])
-                    if key_content:
-                        summary_en = f"Document Summary: This {user.department} department document ({word_count} words) contains information about: {key_content}..."
-                    else:
-                        summary_en = f"Document Summary: This {user.department} department document contains {word_count} words of financial and policy information. Key topics include: {', '.join(words[:15])}..."
-                
-                # Translate English summary to Arabic
-                try:
-                    summary_ar = translate_text(summary_en, 'ar')
-                except:
-                    summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية والسياسات."
-        else:
-            # Use regular summary for non-PDF, non-financial documents
-            try:
-                summary_en = query_gemini(f"Please provide a concise summary of this {user.department} department document:\n\n{extracted_text[:2000]}", user.department, 'en')
-                summary_ar = translate_text(summary_en, 'ar')
-                # Check if we got a generic response
-                if "Hello! I'm your AI assistant" in summary_en or "How can I assist you today" in summary_en:
-                    raise Exception("Got generic response from Gemini")
-                logger.info(f"Re-generated regular summary: {document.filename}")
-            except Exception as e:
-                logger.error(f"Gemini summary error during re-ingestion: {str(e)}")
-                summary_en = get_document_summary(extracted_text)
-                if not summary_en or "Hello! I'm your AI assistant" in summary_en or len(summary_en.strip()) < 50:
-                    words = extracted_text.split()
-                    word_count = len(words)
-                    sentences = extracted_text.split('.')[:3]
-                    key_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
-                    key_content = '. '.join(key_sentences[:2])
-                    if key_content:
-                        summary_en = f"Document Summary: This {user.department} department document ({word_count} words) contains information about: {key_content}..."
-                    else:
-                        summary_en = f"Document Summary: This {user.department} department document contains {word_count} words of financial and policy information. Key topics include: {', '.join(words[:15])}..."
-                
-                # Translate English summary to Arabic
-                try:
-                    summary_ar = translate_text(summary_en, 'ar')
-                except:
-                    summary_ar = f"ملخص المستند: تم تحليل مستند من قسم {user.department} بنجاح. يحتوي على معلومات مهمة حول العمليات المالية والسياسات."
+            logger.error(f"❌ RAG system failed to generate summary for re-ingestion: {document.filename}")
+            logger.warning(f"⚠️ Basic summary fallback is disabled - only RAG summaries are allowed")
+            
+            # Set minimal summary indicating RAG failure
+            summary_en = f"Document re-ingested successfully but RAG summary generation failed. Document type: {financial_doc_type}"
+            summary_ar = f"تم إعادة معالجة المستند بنجاح ولكن فشل في إنشاء ملخص RAG. نوع المستند: {financial_doc_type}"
+        # All other cases are handled by the basic fallback above
         
         # Update document with new summaries
         document.summary = summary_en
@@ -738,20 +598,78 @@ def chat():
         message = request.form.get('message', '').strip()
         language = request.form.get('language', 'en')
         
+        # Handle file upload if present
+        uploaded_file = None
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and file.filename and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                file.save(filepath)
+                
+                # Extract text from uploaded file
+                try:
+                    extracted_text = extract_text_from_file(filepath)
+                    if extracted_text.strip():
+                        # Add file content to message
+                        if message:
+                            message += f"\n\n[Attached file: {filename}]\n{extracted_text[:1000]}..."
+                        else:
+                            message = f"Please analyze this file: {filename}\n\n{extracted_text[:1000]}..."
+                        uploaded_file = filename
+                    else:
+                        flash('No text could be extracted from the uploaded file', 'error')
+                except Exception as e:
+                    logger.error(f"Error processing uploaded file {filename}: {str(e)}")
+                    flash(f'Error processing uploaded file: {str(e)}', 'error')
+                    os.remove(filepath)
+            elif file and file.filename:
+                flash('Invalid file type. Allowed types: PDF, DOCX, DOC, PNG, JPG, JPEG, TIFF', 'error')
+        
         if message:
-            # Save user message to database
-            user_message = ChatMessage(
-                user_id=user.id,
-                type='user',
-                content=message,
-                language=language,
-                department=user.department
-            )
-            db.session.add(user_message)
-            db.session.commit()
+            # Initialize session data if not exists
+            if 'chat_messages' not in session:
+                session['chat_messages'] = []
+            if 'chat_history' not in session:
+                session['chat_history'] = []
+            
+            # Generate unique chat ID for this conversation
+            if not session.get('current_chat_id'):
+                session['current_chat_id'] = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{user.id}"
+            
+            chat_id = session['current_chat_id']
+            
+            # Save user message to session
+            user_message_data = {
+                'id': f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}",
+                'chat_id': chat_id,
+                'type': 'user',
+                'content': message,
+                'language': language,
+                'timestamp': datetime.now().isoformat(),
+                'attached_file': uploaded_file
+            }
+            session['chat_messages'].append(user_message_data)
+            
+            # Add to chat history if this is a new conversation
+            chat_exists = any(chat['id'] == chat_id for chat in session['chat_history'])
+            if not chat_exists:
+                chat_summary = message[:50] + "..." if len(message) > 50 else message
+                session['chat_history'].append({
+                    'id': chat_id,
+                    'summary': chat_summary,
+                    'timestamp': datetime.now().isoformat(),
+                    'language': language
+                })
             
             # Try FAQ service first, then RAG system, then local search, then fallbacks
             response = None
+            response_source = None
+            
+            # Log the incoming question
+            logger.info(f"📝 Question from {user.username} ({user.department}): '{message[:100]}{'...' if len(message) > 100 else ''}'")
+            if uploaded_file:
+                logger.info(f"📎 File attached: {uploaded_file}")
             
             # Try FAQ service first - highest priority for CBO-specific questions
             try:
@@ -761,9 +679,10 @@ def chat():
                     if faq_match:
                         faq_question, faq_answer = faq_match
                         response = faq_answer
-                        logger.info(f"Using FAQ response for query: '{message}' -> '{faq_question}'")
+                        response_source = "FAQ Service"
+                        logger.info(f"✅ FAQ Response: '{message[:50]}{'...' if len(message) > 50 else ''}' -> '{faq_question[:50]}{'...' if len(faq_question) > 50 else ''}'")
             except Exception as e:
-                logger.error(f"FAQ service error: {str(e)}")
+                logger.error(f"❌ FAQ service error: {str(e)}")
             
             # Try RAG system if FAQ didn't provide a response
             if not response and rag_system and rag_system.is_ready():
@@ -772,34 +691,50 @@ def chat():
                     rag_response, rag_response_en = query_rag(message, language, user.department)
                     if rag_response and rag_response.strip() and not rag_response.startswith("RAG system not"):
                         response = rag_response
-                        logger.info(f"Using RAG response for query: '{message}'")
+                        response_source = "RAG System (Integration)"
+                        logger.info(f"🤖 RAG Response: '{message[:50]}{'...' if len(message) > 50 else ''}' -> Generated from document context")
+                        logger.debug(f"RAG Response length: {len(rag_response)} characters")
                 except Exception as e:
-                    logger.error(f"RAG query error: {str(e)}")
+                    logger.error(f"❌ RAG query error: {str(e)}")
+                    logger.info(f"⚠️ RAG system failed, trying local search...")
             
             # If RAG didn't provide a good response, try local search
             if not response:
+                logger.info(f"🔍 Trying local search for: '{message[:50]}{'...' if len(message) > 50 else ''}'")
                 local_results = search_documents(message, user.department)
                 if local_results and local_results[0]['score'] >= 0.3:
                     response = format_local_response(local_results)
-                    logger.info(f"Using local search results for query: '{message}'")
+                    response_source = "Local Document Search"
+                    logger.info(f"📄 Local Search Response: Found {len(local_results)} relevant documents (top score: {local_results[0]['score']:.2f})")
+                    logger.debug(f"Top result: {local_results[0]['filename']} - {local_results[0]['excerpt'][:100]}...")
+                else:
+                    logger.info(f"⚠️ Local search found no relevant documents (threshold: 0.3)")
             
             # If still no response, use fallbacks
             if not response:
+                logger.info(f"🌐 Trying Gemini API fallback for: '{message[:50]}{'...' if len(message) > 50 else ''}'")
                 # Use Gemini fallback for general questions
                 try:
                     response = query_gemini(message, user.department, language)
                     # Check if we got a generic response from Gemini
                     if "Hello! I'm your AI assistant" in response or "How can I assist you today" in response:
                         raise Exception("Got generic response from Gemini")
+                    response_source = "Gemini API"
+                    logger.info(f"🤖 Gemini Response: Generated AI response for query")
+                    logger.debug(f"Gemini Response length: {len(response)} characters")
                 except Exception as e:
-                    logger.error(f"Gemini API error: {str(e)}")
+                    logger.error(f"❌ Gemini API error: {str(e)}")
+                    logger.info(f"⚠️ Gemini failed, trying difflib fallback...")
                     # Use difflib as fallback for simple questions
                     try:
                         response = get_difflib_response(message, user.department, language)
-                        logger.info(f"Using difflib fallback for query: '{message}'")
+                        response_source = "Difflib Fallback"
+                        logger.info(f"🔤 Difflib Response: Pattern matching fallback for query")
                     except Exception as difflib_error:
-                        logger.error(f"Difflib fallback error: {str(difflib_error)}")
+                        logger.error(f"❌ Difflib fallback error: {str(difflib_error)}")
+                        logger.info(f"⚠️ All AI services failed, using hardcoded fallback...")
                         # Final fallback - provide department-specific helpful responses
+                        response_source = "Hardcoded Fallback"
                         if language == 'ar':
                             if "oman central bank" in message.lower() or "البنك المركزي العماني" in message.lower():
                                 response = f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {user.department}، نركز على {get_department_focus_arabic(user.department)}. كيف يمكنني مساعدتك أكثر؟"
@@ -814,25 +749,169 @@ def chat():
                                 response = f"Finance Report 2023: In the {user.department} department, we focus on {get_department_focus(user.department)}. I can help you analyze financial reports, budgets, and accounting statements. What specific question do you have about the finance report?"
                             else:
                                 response = f"Hello! I'm your AI assistant for the {user.department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
+                        
+                        logger.info(f"🔧 Hardcoded Fallback Response: Department-specific template response")
             
-            # Save assistant response to database (no masking for chat)
-            assistant_message = ChatMessage(
-                user_id=user.id,
-                type='assistant',
-                content=response,
-                language=language,
-                department=user.department
-            )
-            db.session.add(assistant_message)
-            db.session.commit()
+            # Log final response summary
+            if response:
+                logger.info(f"✅ FINAL RESPONSE from {response_source}: {len(response)} characters")
+                logger.info(f"📊 Response Source: {response_source}")
+                logger.debug(f"Response preview: {response[:200]}{'...' if len(response) > 200 else ''}")
+            else:
+                logger.error(f"❌ NO RESPONSE GENERATED - All systems failed")
+                response = "I apologize, but I'm unable to process your request at the moment. Please try again later."
+                response_source = "Error Fallback"
+            
+            # Save assistant response to session
+            assistant_message_data = {
+                'id': f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}",
+                'chat_id': chat_id,
+                'type': 'assistant',
+                'content': response,
+                'language': language,
+                'timestamp': datetime.now().isoformat(),
+                'response_source': response_source  # Store response source in session
+            }
+            session['chat_messages'].append(assistant_message_data)
+            
+            # Mark session as modified to save changes
+            session.modified = True
     
-    # Get recent messages for this user
-    recent_messages = ChatMessage.query.filter_by(user_id=user.id).order_by(ChatMessage.timestamp.desc()).limit(20).all()
+    # Get session-based messages for this user
+    session_messages = session.get('chat_messages', [])
     
-    # Reverse to show oldest first
-    messages = list(reversed(recent_messages))
+    # Convert session messages to the format expected by template
+    messages = []
+    for msg in session_messages:
+        # Create a mock message object with the required attributes
+        class SessionMessage:
+            def __init__(self, data):
+                self.id = data.get('id', '')
+                self.type = data.get('type', 'user')
+                self.content = data.get('content', '')
+                self.timestamp = data.get('timestamp', datetime.now())
+                self.language = data.get('language', 'en')
+        
+        messages.append(SessionMessage(msg))
     
     return render_template('chat.html', messages=messages)
+
+@app.route('/api/chat-history')
+@login_required
+def get_chat_history():
+    """Get session-based chat history for the current user"""
+    user = get_current_user()
+    try:
+        # Get session-based chat history
+        session_chats = session.get('chat_history', [])
+        
+        logger.info(f"📋 Chat History Request from {user.username} ({user.department}): {len(session_chats)} chats found")
+        
+        chat_summaries = []
+        for chat in session_chats:
+            # Create a summary from the first part of the message
+            summary = chat['content'][:50] + "..." if len(chat['content']) > 50 else chat['content']
+            
+            chat_summaries.append({
+                'id': chat['id'],
+                'summary': summary,
+                'timestamp': chat['timestamp'],
+                'language': chat.get('language', 'en')
+            })
+        
+        logger.debug(f"Returning {len(chat_summaries)} chat summaries")
+        return jsonify({
+            'success': True,
+            'chats': chat_summaries
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting session chat history for {user.username}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/chat-history/<chat_id>')
+@login_required
+def get_chat_messages(chat_id):
+    """Get messages for a specific session-based chat"""
+    try:
+        # Get session-based chat history
+        session_chats = session.get('chat_history', [])
+        
+        # Find the specific chat
+        target_chat = None
+        for chat in session_chats:
+            if chat['id'] == chat_id:
+                target_chat = chat
+                break
+        
+        if not target_chat:
+            return jsonify({
+                'success': False,
+                'error': 'Chat not found'
+            }), 404
+        
+        # Get session-based messages for this chat
+        session_messages = session.get('chat_messages', [])
+        message_list = []
+        
+        for msg in session_messages:
+            # Find messages that belong to this chat session
+            if msg.get('chat_id') == chat_id:
+                message_list.append({
+                    'id': msg['id'],
+                    'type': msg['type'],
+                    'content': msg['content'],
+                    'timestamp': msg['timestamp'],
+                    'language': msg.get('language', 'en')
+                })
+        
+        return jsonify({
+            'success': True,
+            'messages': message_list
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting session chat messages: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/new-chat', methods=['POST'])
+@login_required
+def new_chat():
+    """Start a new chat session"""
+    user = get_current_user()
+    try:
+        # Clear current chat messages but keep chat history
+        previous_messages_count = len(session.get('chat_messages', []))
+        if 'chat_messages' in session:
+            session['chat_messages'] = []
+        
+        # Generate new chat ID
+        new_chat_id = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{user.id}"
+        session['current_chat_id'] = new_chat_id
+        
+        session.modified = True
+        
+        logger.info(f"🆕 New Chat Session created for {user.username} ({user.department}): {new_chat_id}")
+        logger.info(f"📊 Cleared {previous_messages_count} previous messages")
+        
+        return jsonify({
+            'success': True,
+            'message': 'New chat session started',
+            'chat_id': new_chat_id
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error starting new chat for {user.username}: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/documents')
 @login_required
@@ -955,12 +1034,21 @@ def rag_ingest():
         
         # Ingest each document
         ingested_count = 0
+        logger.info(f"🔧 RAG: Starting bulk ingestion of {len(docs)} documents for department: {user.department}")
         for doc in docs:
             file_path = os.path.join(app.config['UPLOAD_FOLDER'], doc.filename)
             if os.path.exists(file_path):
+                logger.info(f"🔧 RAG: Ingesting document {doc.filename} from bulk operation")
                 success = add_document_to_rag(file_path, doc.filename, doc.department)
                 if success:
                     ingested_count += 1
+                    logger.info(f"✅ RAG: Successfully ingested {doc.filename} in bulk operation")
+                else:
+                    logger.warning(f"❌ RAG: Failed to ingest {doc.filename} in bulk operation")
+            else:
+                logger.warning(f"⚠️ RAG: File not found for bulk ingestion: {doc.filename}")
+        
+        logger.info(f"📊 RAG: Bulk ingestion completed: {ingested_count}/{len(docs)} documents ingested")
         
         return jsonify({
             'status': 'success',
@@ -1066,13 +1154,10 @@ def voice_finalize():
                 meta['whisper_language'] = result.get('language', '')
                 meta['whisper_load_time_s'] = result.get('load_time_s', '')
                 meta['whisper_infer_time_s'] = result.get('infer_time_s', '')
-                # Log transcript and performance
+                # Log transcript and performance (minimal logging)
                 _t = meta.get('transcript', '')
-                _preview = (_t[:200] + '...') if len(_t) > 200 else _t
-                logger.info(f"Whisper transcript ({len(_t)} chars): {_preview}")
-                logger.info(
-                    f"Whisper perf load={meta.get('whisper_load_time_s','')}s infer={meta.get('whisper_infer_time_s','')}s lang={meta.get('whisper_language','')}"
-                )
+                if _t:
+                    logger.debug(f"Whisper transcription completed: {len(_t)} chars")
                 meta['whisper_used'] = True
             except Exception as e:
                 logger.warning(f"Whisper transcription failed: {e}")
@@ -1113,8 +1198,8 @@ def voice_transcribe_full():
             resp['whisper_infer_time_s'] = result.get('infer_time_s', '')
             resp['whisper_used'] = True
             _t = resp['transcript']
-            _preview = (_t[:200] + '...') if len(_t) > 200 else _t
-            logger.info(f"Whisper transcript (full upload, {len(_t)} chars): {_preview}")
+            if _t:
+                logger.debug(f"Whisper full transcription completed: {len(_t)} chars")
         else:
             resp['whisper_reason'] = 'service_unavailable'
     except Exception as e:
@@ -1147,7 +1232,7 @@ if __name__ == '__main__':
     print("📝 Core app functionality: Document upload, search, and chat")
     print("📝 AI features: Gemini integration, local search, translation")
     if RAG_ENABLED:
-        print("🤖 RAG features: Advanced document-based Q&A")
+        print("🤖 RAG features: Advanced document-based Q&A (Integration)")
     print("="*60 + "\n")
     
     # Initialize RAG if enabled

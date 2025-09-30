@@ -2,16 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 Standalone Document Ingestion Script for GPU Processing
-Run this script on a GPU-enabled machine to process documents and save weights
+Run this script on a GPU-enabled machine to process documents for RAG Integration
 
 This script processes all documents in the uploads folder and creates:
 1. FAISS vector store with document embeddings
-2. Falcon model weights file for inference
-3. Processed document chunks with metadata
+2. Processed document chunks with metadata
+3. RAG system ready for queries
 
 Usage:
     python ingest_documents_gpu.py --upload_folder ./uploads --verbose
-    python ingest_documents_gpu.py --upload_folder ./uploads --weights_path ./custom_weights.pth
+    python ingest_documents_gpu.py --upload_folder ./uploads --force
 """
 
 import os
@@ -34,8 +34,8 @@ def check_gpu_availability():
             print(f"✅ GPU detected: {gpu_name} (Count: {gpu_count})")
             return True
         else:
-            print("⚠️ No GPU detected. Falcon model will not be loaded.")
-            print("   Document processing will still work, but queries will use Gemini fallback.")
+            print("⚠️ No GPU detected. RAG model will use CPU.")
+            print("   Document processing will still work, but may be slower.")
             return False
     except ImportError:
         print("❌ PyTorch not installed. Please install torch first.")
@@ -43,7 +43,7 @@ def check_gpu_availability():
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Ingest documents for Oman Central Bank Hallucination-Fixed RAG system',
+        description='Ingest documents for Oman Central Bank RAG Integration system',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -53,8 +53,8 @@ Examples:
   # With verbose logging
   python ingest_documents_gpu.py --upload_folder ./uploads --verbose
 
-  # Custom weights path
-  python ingest_documents_gpu.py --upload_folder ./uploads --weights_path ./custom_weights.pth
+  # Force re-processing
+  python ingest_documents_gpu.py --upload_folder ./uploads --force
 
   # Process specific folder
   python ingest_documents_gpu.py --upload_folder /path/to/documents --verbose
@@ -63,12 +63,10 @@ Examples:
     
     parser.add_argument('--upload_folder', required=True, 
                        help='Path to upload folder containing documents (PDF, TXT, MD files)')
-    parser.add_argument('--weights_path', 
-                       help='Path to save model weights (default: upload_folder/falcon_h1_weights.pth)')
     parser.add_argument('--verbose', '-v', action='store_true', 
                        help='Enable verbose logging')
     parser.add_argument('--force', '-f', action='store_true',
-                       help='Force re-processing even if weights file exists')
+                       help='Force re-processing even if vector store exists')
     
     args = parser.parse_args()
     
@@ -80,7 +78,7 @@ Examples:
     )
     
     print("="*60)
-    print("🚀 Oman Central Bank - Hallucination Fixed RAG Ingestion")
+    print("🚀 Oman Central Bank - RAG Integration Ingestion")
     print("="*60)
     
     # Check GPU availability
@@ -113,43 +111,40 @@ Examples:
     if len(documents) > 5:
         print(f"   ... and {len(documents) - 5} more")
     
-    # Check if weights already exist
-    weights_path = args.weights_path or upload_folder / "falcon_h1_weights.pth"
-    if weights_path.exists() and not args.force:
-        print(f"⚠️ Weights file already exists: {weights_path}")
+    # Check if vector store already exists (look for common vector store files)
+    vector_store_files = list(upload_folder.glob("*.pkl")) + list(upload_folder.glob("*.faiss"))
+    if vector_store_files and not args.force:
+        print(f"⚠️ Vector store files already exist: {[f.name for f in vector_store_files]}")
         print("   Use --force to re-process documents")
         sys.exit(0)
     
     try:
         # Import and initialize RAG system
-        print("\n🔧 Initializing Hallucination Fixed RAG system...")
-        from app_lib.hallucination_fixed_rag import HallucinationFixedRAG
+        print("\n🔧 Initializing RAG Integration system...")
+        from app_lib.rag_integration import initialize_rag_system
         
         start_time = time.time()
-        rag = HallucinationFixedRAG(str(upload_folder))
+        rag = initialize_rag_system(str(upload_folder))
+        
+        if not rag:
+            print("❌ Failed to initialize RAG system")
+            sys.exit(1)
         
         print("📚 Ingesting documents...")
-        success = rag.ingest_documents(str(upload_folder))
+        success = rag.ingest_documents_from_folder(str(upload_folder))
         
         if success:
             ingestion_time = time.time() - start_time
             print(f"✅ Document ingestion completed successfully in {ingestion_time:.2f} seconds")
             
-            # Save weights
-            print("💾 Saving model weights...")
-            weights_saved = rag.save_weights(str(weights_path))
-            
-            if weights_saved:
-                print(f"✅ Model weights saved to: {weights_path}")
-            else:
-                print("⚠️ Failed to save model weights")
-            
             # Show stats
             stats = rag.get_stats()
             print(f"\n📊 Processing Statistics:")
-            print(f"   - Documents indexed: {stats.get('documents_indexed', 0)}")
-            print(f"   - Model loaded: {stats.get('model_loaded', False)}")
-            print(f"   - GPU available: {stats.get('gpu_available', False)}")
+            print(f"   - Documents indexed: {stats.get('document_count', 0)}")
+            print(f"   - System initialized: {stats.get('initialized', False)}")
+            print(f"   - Embeddings ready: {stats.get('embeddings_ready', False)}")
+            print(f"   - LLM ready: {stats.get('llm_ready', False)}")
+            print(f"   - QA chain ready: {stats.get('qa_chain_ready', False)}")
             print(f"   - Processing time: {ingestion_time:.2f} seconds")
             
             # Test the system
@@ -166,13 +161,13 @@ Examples:
             
             # Show final status
             if not gpu_available:
-                print(f"\n💡 Note: No GPU detected - Falcon model not loaded")
-                print(f"   All queries will use Gemini fallback for responses")
-                print(f"   Document processing and vector search still work normally")
+                print(f"\n💡 Note: No GPU detected - RAG model will use CPU")
+                print(f"   Processing may be slower but will still work")
+                print(f"   Document processing and vector search work normally")
             
             print(f"\n🎉 Ingestion completed successfully!")
             print(f"   You can now use the RAG system in your application.")
-            print(f"   Weights file: {weights_path}")
+            print(f"   Vector store created in: {upload_folder}")
             
         else:
             print("❌ Document ingestion failed")

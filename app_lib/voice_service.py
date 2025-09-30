@@ -210,7 +210,7 @@ class VoiceRecordingService:
         
         Returns dict with: text, language, duration_s, load_time_s, infer_time_s, processor_used
         """
-        logger.info(f"Starting transcription with fallback support, audio size: {len(audio_bytes)} bytes, format: {format_hint}")
+        logger.debug(f"Starting transcription, audio size: {len(audio_bytes)} bytes")
         
         if not audio_bytes:
             logger.warning("No audio data provided for transcription")
@@ -219,11 +219,11 @@ class VoiceRecordingService:
         # Try fallback processor first if available
         if self._whisper_handler:
             try:
-                logger.info("Attempting transcription with fallback processor")
+                logger.debug("Attempting transcription with fallback processor")
                 result = self._whisper_handler.transcribe_audio_bytes(audio_bytes, format_hint)
                 
                 if result.get('success'):
-                    logger.info(f"Fallback transcription successful: {result.get('text', '')[:100]}...")
+                    logger.debug(f"Fallback transcription successful: {len(result.get('text', ''))} chars")
                     return {
                         "text": result.get('text', ''),
                         "language": result.get('language', ''),

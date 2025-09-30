@@ -131,7 +131,7 @@ class DepartmentTagger:
 def get_llm():
     """Initialize and return the language model"""
     try:
-        model_name = "google/flan-t5-base"
+        model_name = "tiiuae/Falcon3-1B-Base"
         logger.info(f"Initializing LLM model: {model_name}")
         
         # Check if transformers and torch are available
@@ -289,26 +289,40 @@ class OmanCBRAG:
 
     def ingest_single_document(self, file_path: str, filename: str, department: str) -> bool:
         """Ingest a single document into the RAG system"""
+        logger.info(f"📄 RAG: Ingesting document: {filename}")
+        logger.info(f"📁 RAG: Processing file: {file_path}")
+        
         try:
             if not self.embeddings or not self.llm:
-                logger.error("RAG components not initialized")
+                logger.error(f"❌ RAG: Components not initialized for {filename}")
                 return False
                 
             file_type = 'pdf' if filename.lower().endswith('.pdf') else 'image'
+            logger.info(f"📋 RAG: File type detected: {file_type}")
+            
+            logger.info(f"🔄 RAG: Processing document with processor...")
             text_orig, text_en, sum_en, sum_ar = self.processor.process_document(file_path, file_type)
+            logger.info(f"📊 RAG: Document processing completed")
+            logger.info(f"📏 RAG: Original text length: {len(text_orig) if text_orig else 0} chars")
+            logger.info(f"📏 RAG: English text length: {len(text_en) if text_en else 0} chars")
+            logger.info(f"📝 RAG: Summary EN length: {len(sum_en) if sum_en else 0} chars")
+            logger.info(f"📝 RAG: Summary AR length: {len(sum_ar) if sum_ar else 0} chars")
             
             if not text_en or not text_en.strip():
-                logger.warning(f"No text extracted from {filename}")
+                logger.warning(f"⚠️ RAG: No text extracted from {filename}")
                 return False
             
             # Use provided department or auto-detect
             depts = [department] if department else self.tagger.tag(text_en)
+            logger.info(f"🏢 RAG: Departments assigned: {depts}")
             
+            logger.info(f"✂️ RAG: Splitting text into chunks...")
             splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
             chunks = splitter.split_text(text_en)
+            logger.info(f"📦 RAG: Created {len(chunks)} text chunks")
             
             documents = []
-            for chunk in chunks:
+            for i, chunk in enumerate(chunks):
                 if chunk.strip():
                     doc = Document(
                         page_content=chunk,
@@ -321,19 +335,27 @@ class OmanCBRAG:
                         }
                     )
                     documents.append(doc)
+                    logger.debug(f"📄 RAG: Created document chunk {i+1}/{len(chunks)} for {filename}")
 
             if not documents:
+                logger.error(f"❌ RAG: No valid documents created from {filename}")
                 return False
 
+            logger.info(f"🔍 RAG: Creating vector embeddings for {len(documents)} documents...")
             # Add to existing vector store or create new one
             if self.vector_store:
+                logger.info(f"🔄 RAG: Merging with existing vector store...")
                 # Add to existing vector store
                 new_vector_store = FAISS.from_documents(documents, self.embeddings)
                 self.vector_store.merge_from(new_vector_store)
+                logger.info(f"✅ RAG: Successfully merged {len(documents)} documents with existing vector store")
             else:
+                logger.info(f"🆕 RAG: Creating new vector store...")
                 # Create new vector store
                 self.vector_store = FAISS.from_documents(documents, self.embeddings)
+                logger.info(f"✅ RAG: Successfully created new vector store with {len(documents)} documents")
 
+            logger.info(f"🔗 RAG: Recreating QA chain with updated vector store...")
             # Recreate QA chain with updated vector store
             retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 3})
             self.qa_chain = RetrievalQA.from_chain_type(
@@ -345,26 +367,38 @@ class OmanCBRAG:
             )
             
             self.is_initialized = True
-            logger.info(f"Successfully ingested document: {filename}")
+            logger.info(f"🎉 RAG: SUCCESS - Document {filename} fully ingested into RAG system")
+            logger.info(f"📊 RAG: Final result - {len(documents)} chunks indexed, system ready for queries")
             return True
             
         except Exception as e:
-            logger.error(f"Error ingesting single document {filename}: {str(e)}")
+            logger.error(f"❌ RAG: Error ingesting single document {filename}: {str(e)}")
+            logger.error(f"🔍 RAG: Full error details: {str(e)}")
             return False
 
     def query(self, question: str, language: str = 'en') -> Tuple[str, str]:
         """Query the RAG system"""
+        logger.info(f"🔍 RAG: Starting query processing")
+        logger.info(f"❓ RAG: Question: {question[:100]}{'...' if len(question) > 100 else ''}")
+        logger.info(f"🌐 RAG: Language: {language}")
+        
         try:
             if not self.qa_chain or not self.is_initialized:
+                logger.warning(f"⚠️ RAG: System not initialized for query")
                 return "RAG system not initialized. Please ensure documents are ingested first.", ""
 
+            logger.info(f"🔍 RAG: Executing query against vector store...")
             result = self.qa_chain({"query": question})
             answer_en = result["result"]
+            logger.info(f"📤 RAG: Query completed, response length: {len(answer_en)} chars")
 
             if language == 'ar':
+                logger.info(f"🌐 RAG: Translating response to Arabic...")
                 answer_ar = self.processor.translate_text_in_chunks(answer_en, dest='ar')
+                logger.info(f"✅ RAG: Arabic translation completed")
                 return answer_ar, answer_en
             else:
+                logger.info(f"✅ RAG: Query completed successfully")
                 return answer_en, answer_en
                 
         except Exception as e:
@@ -421,18 +455,39 @@ def get_rag_system() -> Optional[OmanCBRAG]:
 
 def add_document_to_rag(file_path: str, filename: str, department: str) -> bool:
     """Add a document to the RAG system"""
+    logger.info(f"🔧 RAG: Starting document ingestion for: {filename}")
+    logger.info(f"📁 RAG: File path: {file_path}")
+    logger.info(f"🏢 RAG: Department: {department}")
+    
     global rag_system
     if not rag_system:
+        logger.info(f"🔄 RAG: System not initialized, initializing...")
         rag_system = initialize_rag_system()
     
     if rag_system:
-        return rag_system.ingest_single_document(file_path, filename, department)
-    return False
+        logger.info(f"✅ RAG: System ready, calling ingest_single_document")
+        result = rag_system.ingest_single_document(file_path, filename, department)
+        if result:
+            logger.info(f"🎉 RAG: SUCCESS - Document {filename} successfully ingested into RAG system")
+        else:
+            logger.error(f"❌ RAG: FAILED - Document {filename} could not be ingested into RAG system")
+        return result
+    else:
+        logger.error(f"❌ RAG: System initialization failed, cannot ingest document {filename}")
+        return False
 
 def query_rag(question: str, language: str = 'en') -> Tuple[str, str]:
     """Query the RAG system"""
+    logger.info(f"🔍 RAG: Query request received")
+    logger.info(f"❓ RAG: Question: {question[:100]}{'...' if len(question) > 100 else ''}")
+    logger.info(f"🌐 RAG: Language: {language}")
+    
     global rag_system
     if not rag_system:
+        logger.warning(f"⚠️ RAG: System not available for query")
         return "RAG system not available", ""
     
-    return rag_system.query(question, language)
+    logger.info(f"✅ RAG: System available, processing query...")
+    result = rag_system.query(question, language)
+    logger.info(f"📤 RAG: Query result returned")
+    return result

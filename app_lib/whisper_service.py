@@ -90,7 +90,7 @@ class WhisperService:
             logger.error(f"Whisper not installed: {e}")
             raise
 
-        logger.info(f"Loading Whisper model '{self.model_name}' on device '{self.device}'...")
+        logger.debug(f"Loading Whisper model '{self.model_name}' on device '{self.device}'...")
         self._model = whisper.load_model(self.model_name, device=self.device)
         elapsed = time.perf_counter() - t0
         logger.info(f"Whisper model loaded in {elapsed:.2f}s")
@@ -170,7 +170,7 @@ class WhisperService:
 
     def _transcribe_with_fallback(self, audio_bytes: bytes, file_suffix: str) -> Dict[str, str]:
         """Transcribe using fallback audio processor when FFmpeg is not available"""
-        logger.info("Attempting transcription with fallback audio processor")
+        logger.debug("Attempting transcription with fallback audio processor")
         try:
             # Import and use the fallback processor
             from server_audio_processor import WhisperAudioHandler

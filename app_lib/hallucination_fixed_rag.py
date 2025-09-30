@@ -169,9 +169,9 @@ class HallucinationFixedRAG:
         self.is_ready_flag = False
 
     def is_ready(self):
-        # System is ready if we have a vector store, even without the LLM model
-        # The LLM model is optional - we can use Gemini fallback
-        return self.is_ready_flag and self.vector_store is not None
+        # System is ready if the flag is set, even without documents initially
+        # Documents will be indexed when uploaded
+        return self.is_ready_flag
 
     def get_stats(self):
         if self.vector_store:
@@ -181,6 +181,109 @@ class HallucinationFixedRAG:
                 "gpu_available": torch.cuda.is_available()
             }
         return {"documents_indexed": 0, "model_loaded": False, "gpu_available": False}
+
+    def add_single_document(self, file_path, filename, department=None):
+        """Add a single document to the RAG system"""
+        try:
+            logger.info(f"🔧 RAG: Adding single document: {filename}")
+            
+            if not os.path.exists(file_path):
+                logger.error(f"❌ RAG: File not found: {file_path}")
+                return False
+            
+            file_extension = os.path.splitext(filename)[1].lower()
+            
+            # Process the document
+            if file_extension == ".pdf":
+                _, text_en, sum_en, sum_ar = self.processor.process_document(file_path, 'pdf')
+            elif file_extension == ".txt":
+                _, text_en, sum_en, sum_ar = self.processor.process_document(file_path, 'txt')
+            elif file_extension == ".md":
+                _, text_en, sum_en, sum_ar = self.processor.process_document(file_path, 'md')
+            else:
+                logger.warning(f"⚠️ RAG: Unsupported file type: {file_extension}")
+                return False
+            
+            if not text_en or not text_en.strip():
+                logger.warning(f"⚠️ RAG: No text extracted from {filename}")
+                return False
+            
+            # Use provided department or auto-detect
+            depts = [department] if department else self.tagger.tag(text_en)
+            logger.info(f"🏢 RAG: Department assigned: {depts}")
+            
+            # Split text into chunks
+            from langchain.text_splitter import RecursiveCharacterTextSplitter
+            splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+            chunks = splitter.split_text(text_en)
+            logger.info(f"📦 RAG: Created {len(chunks)} chunks for {filename}")
+            
+            # Create documents
+            documents = []
+            for i, chunk in enumerate(chunks):
+                if chunk.strip():
+                    from langchain_core.documents import Document
+                    doc = Document(
+                        page_content=chunk,
+                        metadata={
+                            "filename": filename,
+                            "summary_en": sum_en,
+                            "summary_ar": sum_ar,
+                            "departments": depts,
+                            "file_type": file_extension[1:]  # Remove the dot
+                        }
+                    )
+                    documents.append(doc)
+            
+            if not documents:
+                logger.error(f"❌ RAG: No valid documents created from {filename}")
+                return False
+            
+            # Add to vector store
+            if self.vector_store:
+                logger.info(f"🔄 RAG: Merging {len(documents)} documents with existing vector store")
+                from langchain_community.vectorstores import FAISS
+                new_vector_store = FAISS.from_documents(documents, self.embeddings)
+                self.vector_store.merge_from(new_vector_store)
+                logger.info(f"✅ RAG: Successfully merged documents with existing vector store")
+            else:
+                logger.info(f"🆕 RAG: Creating new vector store with {len(documents)} documents")
+                from langchain_community.vectorstores import FAISS
+                self.vector_store = FAISS.from_documents(documents, self.embeddings)
+                logger.info(f"✅ RAG: Successfully created new vector store")
+            
+            # Recreate QA chain if we have an LLM
+            if self.llm:
+                logger.info(f"🔗 RAG: Recreating QA chain with updated vector store")
+                retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 3})
+                from langchain.chains import RetrievalQA
+                from langchain.prompts import PromptTemplate
+                
+                prompt_template = """Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer.
+
+Context:
+{context}
+
+Question: {question}
+
+Answer:"""
+                prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+                
+                self.qa_chain = RetrievalQA.from_chain_type(
+                    llm=self.llm,
+                    chain_type="stuff",
+                    retriever=retriever,
+                    chain_type_kwargs={"prompt": prompt},
+                    return_source_documents=False,
+                )
+                logger.info(f"✅ RAG: QA chain recreated successfully")
+            
+            logger.info(f"🎉 RAG: Successfully added document {filename} to RAG system")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ RAG: Error adding single document {filename}: {str(e)}")
+            return False
 
     def ingest_documents(self, folder_path=None):
         """Ingest documents from the upload folder and additional files"""
@@ -456,6 +559,11 @@ def initialize_hallucination_fixed_rag(upload_folder, ingest_documents=False):
     try:
         rag = HallucinationFixedRAG(upload_folder)
         
+        # Set system as ready even without documents initially
+        # Documents will be indexed individually when uploaded
+        rag.is_ready_flag = True
+        logger.info("✅ Hallucination Fixed RAG system initialized and ready for document indexing")
+        
         # Only ingest documents if explicitly requested
         if ingest_documents:
             success = rag.ingest_documents(upload_folder)
@@ -464,7 +572,7 @@ def initialize_hallucination_fixed_rag(upload_folder, ingest_documents=False):
             else:
                 logger.warning("⚠️ Hallucination Fixed RAG system initialized but document ingestion failed")
         else:
-            logger.info("✅ Hallucination Fixed RAG system initialized (documents not ingested - use ingest_documents_gpu.py for ingestion)")
+            logger.info("✅ Hallucination Fixed RAG system ready for individual document indexing")
         
         return rag
     except Exception as e:
@@ -481,15 +589,11 @@ def add_document_to_hallucination_fixed_rag(file_path, filename, department):
     """Add a single document to the RAG system"""
     rag = get_hallucination_fixed_rag()
     if not rag:
+        logger.error(f"❌ RAG: System not available for document {filename}")
         return False
     
-    try:
-        # This would need to be implemented to add single documents
-        # For now, we'll re-ingest all documents
-        return rag.ingest_documents(rag.upload_folder)
-    except Exception as e:
-        logger.error(f"Error adding document to RAG: {str(e)}")
-        return False
+    logger.info(f"🔧 RAG: Adding document to hallucination-fixed RAG: {filename}")
+    return rag.add_single_document(file_path, filename, department)
 
 
 def query_hallucination_fixed_rag(question, language='en', department=None):
