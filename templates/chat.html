@@ -52,25 +52,27 @@
         </div>
 
         <!-- Chat Messages -->
-        <div class="flex-1 overflow-y-auto p-6">
-            <div id="chatMessages" class="space-y-4 max-w-4xl mx-auto">
+        <div class="flex-1 overflow-y-auto p-6 bg-white">
+            <div id="chatMessages" class="space-y-6 max-w-5xl mx-auto">
                 {% if messages %}
                     {% for message in messages %}
                     <div class="flex {% if message.type == 'user' %}justify-end{% else %}justify-start{% endif %}">
-                        <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-lg {% if message.type == 'user' %}bg-ocb-blue text-white{% else %}bg-gray-100 text-gray-800{% endif %}">
+                        <div class="{% if message.type == 'user' %}max-w-[70%]{% else %}max-w-[70%]{% endif %}">
                             {% if message.type == 'assistant' %}
-                            <div class="flex items-center mb-1">
+                            <div class="flex items-center mb-2 ml-1">
                                 <i class="fas fa-robot text-ocb-blue mr-2"></i>
-                                <span class="text-xs font-medium">AI Assistant</span>
+                                <span class="text-xs font-medium text-gray-600">AI Assistant</span>
                             </div>
                             {% endif %}
-                                    <div class="text-sm prose prose-sm max-w-none">{{ message.content|markdown|safe }}</div>
+                            <div class="px-6 py-4 rounded-3xl shadow-md {% if message.type == 'user' %}bg-ocb-blue text-white{% else %}bg-gray-100 text-gray-900{% endif %}">
+                                <div class="text-sm prose prose-sm max-w-none {% if message.type == 'user' %}prose-invert{% endif %}">{{ message.content|markdown|safe }}</div>
+                            </div>
                         </div>
                     </div>
                     {% endfor %}
                 {% else %}
                 <div class="text-center text-gray-500 py-12">
-                    <i class="fas fa-comments text-4xl mb-4"></i>
+                    <i class="fas fa-comments text-4xl mb-4 text-gray-400"></i>
                     <p class="text-lg">Start a conversation with the AI assistant</p>
                     <p class="text-sm mt-2">Ask questions about your department's documents</p>
                 </div>
@@ -79,67 +81,98 @@
         </div>
 
         <!-- Chat Input Area -->
-        <div class="bg-white border-t border-gray-200 p-6">
-            <form method="POST" id="chatForm" class="max-w-4xl mx-auto space-y-4">
+        <div class="bg-white border-t border-gray-200 p-6 relative">
+            <!-- Recording Modal Overlay -->
+            <div id="recordingModal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center transition-opacity duration-300">
+                <!-- Modal Content -->
+                <div id="recordingModalContent" class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl mx-4 transform transition-all duration-300">
+                    <!-- Modal Header -->
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center space-x-3">
+                            <div class="relative">
+                                <i class="fas fa-microphone text-red-600 text-2xl"></i>
+                                <span class="absolute -top-1 -right-1 flex h-3 w-3">
+                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                    <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                                </span>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-bold text-gray-900" id="modalStatusText">Recording in Progress</h3>
+                                <p class="text-sm text-gray-600 font-mono" id="modalTimer">00:00 / 01:00</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Waveform Display -->
+                    <div class="bg-gray-50 rounded-xl p-6 mb-6">
+                        <canvas id="waveformCanvas" width="600" height="120" 
+                                class="w-full" 
+                                style="height: 120px;"></canvas>
+                    </div>
+                    
+                    <!-- Stop Recording Button -->
+                    <button type="button" id="stopRecordingBtn" onclick="stopRecording()" 
+                            class="w-full inline-flex items-center justify-center px-6 py-4 border border-transparent text-base font-semibold rounded-xl text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-all duration-200 shadow-lg hover:shadow-xl">
+                        <i class="fas fa-stop mr-3 text-xl"></i>
+                        Stop Recording
+                    </button>
+                    
+                    <!-- Processing State (hidden by default) -->
+                    <div id="processingState" class="hidden text-center">
+                        <div class="inline-flex items-center space-x-3 px-6 py-3 bg-blue-50 rounded-xl">
+                            <i class="fas fa-spinner fa-spin text-blue-600 text-xl"></i>
+                            <span class="text-base font-medium text-blue-900">Processing your recording...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <form method="POST" id="chatForm" class="max-w-4xl mx-auto space-y-4 relative" style="z-index: 10;">
                 <!-- File Upload Area -->
                 <div id="fileUploadArea" class="hidden">
-                    <div class="border border-gray-300 border-dashed rounded-lg p-4">
+                    <div class="border border-gray-300 border-dashed rounded-lg p-4 transition-all duration-300">
                         <div class="flex items-center justify-between">
                             <div class="flex items-center space-x-2">
                                 <i class="fas fa-file text-gray-400"></i>
                                 <span class="text-sm text-gray-600" id="uploadedFileName">No file selected</span>
                             </div>
-                            <button type="button" id="removeFileBtn" class="text-red-500 hover:text-red-700 text-sm">
+                            <button type="button" id="removeFileBtn" class="text-red-500 hover:text-red-700 text-sm transition-colors">
                                 <i class="fas fa-times"></i>
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Compact Audio Recording -->
-                <div class="flex items-center justify-center">
-                    <button type="button" id="recordBtn" onclick="toggleRecording()" 
-                            class="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors duration-200">
-                        <i class="fas fa-microphone text-red-600 mr-2" id="recordIcon"></i>
-                        <span id="recordBtnLabel">Record</span>
-                    </button>
-                    <span id="recordTimer" class="ml-2 text-sm text-gray-600 font-mono">00:00 / 01:00</span>
-                    <div id="recordingStatus" class="ml-2 text-xs text-gray-500"></div>
-                </div>
-
-                <!-- Compact Waveform (only show when recording) -->
-                <div id="waveformContainer" class="hidden">
-                    <canvas id="waveformCanvas" width="600" height="32" 
-                            class="w-full bg-gray-50 border border-gray-200 rounded" 
-                            style="height: 32px;"></canvas>
-                </div>
-
-
                 <!-- Message Input -->
-                <div class="flex items-end space-x-4">
-                    <!-- File Upload Button -->
-                    <button type="button" id="uploadBtn" class="flex-shrink-0 inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors">
-                        <i class="fas fa-paperclip mr-2"></i>
-                        Upload
+                <div class="flex items-end space-x-3">
+                    <!-- Upload Button -->
+                    <button type="button" id="uploadBtn" class="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm relative" style="z-index: 60;">
+                        <i class="fas fa-paperclip text-lg"></i>
                     </button>
                     <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.tiff" class="hidden">
                     
+                    <!-- Record Button (Start Recording) -->
+                    <button type="button" id="recordBtn" onclick="startRecording()" 
+                            class="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm relative" style="z-index: 60;">
+                        <i class="fas fa-microphone text-lg text-red-600" id="recordIcon"></i>
+                    </button>
+                    
                     <!-- Message Input -->
-                    <div class="flex-1">
+                    <div class="flex-1 relative">
                         <label for="message" class="sr-only">Message</label>
-                        <textarea name="message" id="message" rows="2" 
-                                  class="shadow-sm focus:ring-ocb-blue focus:border-ocb-blue block w-full sm:text-sm border-gray-300 rounded-md resize-none"
+                        <textarea name="message" id="message" rows="3" 
+                                  class="shadow-sm focus:ring-2 focus:ring-ocb-blue focus:border-ocb-blue block w-full text-sm border-gray-300 rounded-lg resize-none transition-all duration-200 pr-3 py-3 px-4"
                                   placeholder="Ask a question about your department's documents..."
                                   required></textarea>
                     </div>
                     
                     <!-- Language and Send -->
                     <div class="flex flex-col space-y-2">
-                        <select name="language" id="language" class="block w-24 pl-3 pr-8 py-2 text-base border-gray-300 focus:outline-none focus:ring-ocb-blue focus:border-ocb-blue sm:text-sm rounded-md">
+                        <select name="language" id="language" class="block w-24 pl-3 pr-8 py-2.5 text-sm border-gray-300 focus:outline-none focus:ring-2 focus:ring-ocb-blue focus:border-ocb-blue rounded-lg transition-all duration-200 shadow-sm">
                             <option value="en">EN</option>
                             <option value="ar">AR</option>
                         </select>
-                        <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-ocb-blue hover:bg-blue-700 transition-colors duration-200">
+                        <button type="submit" class="inline-flex items-center justify-center px-5 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-ocb-blue hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ocb-blue transition-all duration-200 shadow-sm hover:shadow-md">
                             <i class="fas fa-paper-plane mr-2"></i>
                             Send
                         </button>
@@ -162,15 +195,17 @@
     
     // Elements
     const recordBtn = document.getElementById('recordBtn');
-    const recordBtnLabel = document.getElementById('recordBtnLabel');
     const recordIcon = document.getElementById('recordIcon');
-    const recordTimer = document.getElementById('recordTimer');
-    const recordingStatus = document.getElementById('recordingStatus');
+    const recordingModal = document.getElementById('recordingModal');
+    const recordingModalContent = document.getElementById('recordingModalContent');
+    const modalTimer = document.getElementById('modalTimer');
+    const modalStatusText = document.getElementById('modalStatusText');
+    const stopRecordingBtn = document.getElementById('stopRecordingBtn');
+    const processingState = document.getElementById('processingState');
     const canvas = document.getElementById('waveformCanvas');
     const messageTextarea = document.getElementById('message');
     
-    // New UI elements
-    const waveformContainer = document.getElementById('waveformContainer');
+    // UI elements
     const uploadBtn = document.getElementById('uploadBtn');
     const fileInput = document.getElementById('fileInput');
     const fileUploadArea = document.getElementById('fileUploadArea');
@@ -283,23 +318,32 @@
                         data.messages.forEach(message => {
                             const messageDiv = document.createElement('div');
                             messageDiv.className = `flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`;
-                            messageDiv.innerHTML = `
-                                <div class="max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${message.type === 'user' ? 'bg-ocb-blue text-white' : 'bg-gray-100 text-gray-800'}">
-                                    ${message.type === 'assistant' ? `
-                                        <div class="flex items-center mb-1">
-                                            <i class="fas fa-robot text-ocb-blue mr-2"></i>
-                                            <span class="text-xs font-medium">AI Assistant</span>
-                                        </div>
-                                    ` : ''}
-                                    <div class="text-sm prose prose-sm max-w-none">${marked.parse(message.content)}</div>
-                                </div>
-                            `;
+                            
+                            const bubbleDiv = document.createElement('div');
+                            bubbleDiv.className = message.type === 'user' ? 'max-w-[70%]' : 'max-w-[70%]';
+                            
+                            if (message.type === 'assistant') {
+                                const labelDiv = document.createElement('div');
+                                labelDiv.className = 'flex items-center mb-2 ml-1';
+                                labelDiv.innerHTML = `
+                                    <i class="fas fa-robot text-ocb-blue mr-2"></i>
+                                    <span class="text-xs font-medium text-gray-600">AI Assistant</span>
+                                `;
+                                bubbleDiv.appendChild(labelDiv);
+                            }
+                            
+                            const contentDiv = document.createElement('div');
+                            contentDiv.className = `px-6 py-4 rounded-3xl shadow-md ${message.type === 'user' ? 'bg-ocb-blue text-white' : 'bg-gray-100 text-gray-900'}`;
+                            contentDiv.innerHTML = `<div class="text-sm prose prose-sm max-w-none ${message.type === 'user' ? 'prose-invert' : ''}">${marked.parse(message.content)}</div>`;
+                            
+                            bubbleDiv.appendChild(contentDiv);
+                            messageDiv.appendChild(bubbleDiv);
                             messagesContainer.appendChild(messageDiv);
                         });
                     } else {
                         messagesContainer.innerHTML = `
                             <div class="text-center text-gray-500 py-12">
-                                <i class="fas fa-comments text-4xl mb-4"></i>
+                                <i class="fas fa-comments text-4xl mb-4 text-gray-400"></i>
                                 <p class="text-lg">Start a conversation with the AI assistant</p>
                                 <p class="text-sm mt-2">Ask questions about your department's documents</p>
                             </div>
@@ -395,14 +439,21 @@
         console.error('[voice] Failed to initialize fallback audio processor:', error);
     }
 
-    // Expose a safe default for onclick even if initialization fails early
-    window.toggleRecording = async function() {
-        console.warn('[voice] toggleRecording called before initialization');
+    // Expose safe defaults for onclick even if initialization fails early
+    window.startRecording = async function() {
+        console.warn('[voice] startRecording called before initialization');
+    };
+    
+    window.stopRecording = async function() {
+        console.warn('[voice] stopRecording called before initialization');
     };
 
-    if (!recordBtn || !recordTimer || !canvas) {
+    if (!recordBtn || !modalTimer || !canvas) {
         console.error('[voice] Required elements not found');
-        return; // leave the noop toggleRecording in place
+        console.error('[voice] recordBtn:', recordBtn);
+        console.error('[voice] modalTimer:', modalTimer);
+        console.error('[voice] canvas:', canvas);
+        return; // leave the noop functions in place
     }
 
     const canvasCtx = canvas.getContext('2d');
@@ -439,21 +490,16 @@
     }
 
     function resizeCanvas() {
-        const rect = canvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        console.log('[voice] resizeCanvas rect.width=', rect.width, 'dpr=', dpr);
+        console.log('[voice] resizeCanvas dpr=', dpr);
         
-        // Set actual canvas pixel size (compact 32px height)
-        canvas.width = Math.max(600, Math.floor(rect.width * dpr));
-        canvas.height = Math.floor(32 * dpr);
+        // Set actual canvas pixel size (120px height for modal)
+        canvas.width = Math.floor(600 * dpr);
+        canvas.height = Math.floor(120 * dpr);
         
-        // Reset and scale the drawing context (avoid cumulative scaling)
+        // Reset and scale the drawing context
         canvasCtx.setTransform(1, 0, 0, 1, 0, 0);
         canvasCtx.scale(dpr, dpr);
-        
-        // CSS display size (compact)
-        canvas.style.width = rect.width + 'px';
-        canvas.style.height = '32px';
         
         clearCanvas();
     }
@@ -464,22 +510,25 @@
         try {
             analyser.getByteTimeDomainData(dataArray);
 
+            const width = 600;
+            const height = 120;
+
             // Clear canvas
             canvasCtx.fillStyle = '#f9fafb';
-            canvasCtx.fillRect(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
+            canvasCtx.fillRect(0, 0, width, height);
 
-            // Draw waveform (compact version)
-            canvasCtx.lineWidth = 1;
-            canvasCtx.strokeStyle = '#1e40af';
+            // Draw waveform
+            canvasCtx.lineWidth = 2.5;
+            canvasCtx.strokeStyle = '#dc2626'; // Red color
             canvasCtx.beginPath();
 
-            const sliceWidth = (canvas.width / (window.devicePixelRatio || 1)) / bufferLength;
+            const sliceWidth = width / bufferLength;
             let x = 0;
-            const centerY = (canvas.height / (window.devicePixelRatio || 1)) / 2;
+            const centerY = height / 2;
 
             for (let i = 0; i < bufferLength; i++) {
                 const v = dataArray[i] / 128.0;
-                const y = centerY + (v * 10); // Smaller amplitude for compact display
+                const y = centerY + ((v - 1) * centerY * 0.8); // Scale amplitude
 
                 if (i === 0) {
                     canvasCtx.moveTo(x, y);
@@ -490,7 +539,7 @@
                 x += sliceWidth;
             }
 
-            canvasCtx.lineTo(canvas.width / (window.devicePixelRatio || 1), centerY);
+            canvasCtx.lineTo(width, centerY);
             canvasCtx.stroke();
 
             rafId = requestAnimationFrame(drawWaveform);
@@ -499,36 +548,49 @@
         }
     }
 
-    function updateButtonState(recording) {
-        if (recording) {
-            recordBtn.classList.remove('border-gray-300', 'text-gray-700', 'bg-white', 'hover:bg-gray-50');
-            recordBtn.classList.add('bg-red-600', 'hover:bg-red-700', 'text-white', 'border-red-600');
-            recordBtnLabel.textContent = 'Stop';
-            recordIcon.classList.remove('fa-microphone', 'text-red-600');
-            recordIcon.classList.add('fa-stop', 'text-white');
-            recordingStatus.textContent = 'Recording...';
-            recordingStatus.classList.add('text-red-600');
-            
-            // Show waveform container
-            waveformContainer.classList.remove('hidden');
-        } else {
-            recordBtn.classList.remove('bg-red-600', 'hover:bg-red-700', 'text-white', 'border-red-600');
-            recordBtn.classList.add('border-gray-300', 'text-gray-700', 'bg-white', 'hover:bg-gray-50');
-            recordBtnLabel.textContent = 'Record';
-            recordIcon.classList.remove('fa-stop', 'text-white');
-            recordIcon.classList.add('fa-microphone', 'text-red-600');
-            recordingStatus.textContent = '';
-            recordingStatus.classList.remove('text-red-600');
-            
-            // Hide waveform container
-            waveformContainer.classList.add('hidden');
+    function showRecordingModal() {
+        // Show modal with animation
+        recordingModal.classList.remove('hidden');
+        stopRecordingBtn.classList.remove('hidden');
+        processingState.classList.add('hidden');
+        
+        // Initialize with scale animation
+        recordingModalContent.style.transform = 'scale(0.95)';
+        recordingModal.style.opacity = '0';
+        
+        setTimeout(() => {
+            recordingModal.style.opacity = '1';
+            recordingModalContent.style.transform = 'scale(1)';
+        }, 10);
+    }
+
+    function hideRecordingModal() {
+        // Hide modal with animation
+        recordingModal.style.opacity = '0';
+        recordingModalContent.style.transform = 'scale(0.95)';
+        
+        setTimeout(() => {
+            recordingModal.classList.add('hidden');
+        }, 300);
+    }
+
+    function updateModalStatus(status) {
+        modalStatusText.textContent = status;
+        
+        if (status === 'Processing your recording...') {
+            stopRecordingBtn.classList.add('hidden');
+            processingState.classList.remove('hidden');
+        } else if (status === 'Complete') {
+            // Keep both hidden for complete state
+            stopRecordingBtn.classList.add('hidden');
+            processingState.classList.add('hidden');
         }
     }
 
     async function startRecording() {
         try {
-            recordBtn.disabled = true;
-            recordingStatus.textContent = 'Starting...';
+            updateModalStatus('Starting...');
+            showRecordingModal();
             console.log('[voice] startRecording invoked');
             
             // Check browser support
@@ -558,7 +620,7 @@
             });
             console.log('[voice] getUserMedia acquired');
 
-            // Create audio context for visualization
+            // Create audio context for analysis
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             
             if (audioContext.state === 'suspended') {
@@ -571,7 +633,6 @@
             source.connect(analyser);
             
             analyser.fftSize = 2048;
-            // Use fftSize for time-domain buffer length
             bufferLength = analyser.fftSize;
             dataArray = new Uint8Array(bufferLength);
             console.log('[voice] analyser configured, bufferLength=', bufferLength);
@@ -584,7 +645,6 @@
                 options.mimeType = 'audio/webm';
             }
 
-            // Ensure a supported MIME type; handle Edge/Firefox variations
             try {
                 mediaRecorder = new MediaRecorder(mediaStream, options);
             } catch (e) {
@@ -603,22 +663,23 @@
             mediaRecorder.onstart = () => console.log('[voice] MediaRecorder started');
             mediaRecorder.onstop = () => console.log('[voice] MediaRecorder stopped');
 
-            // Collect data and upload once on stop
             mediaRecorder.start();
             console.log('[voice] mediaRecorder.start called');
 
             // Start recording state
             isRecording = true;
             startTime = Date.now();
-            updateButtonState(true);
+            updateModalStatus('Recording in Progress');
             
+            // Setup and start waveform drawing
             resizeCanvas();
             drawWaveform();
 
             // Start timer
             timerInterval = setInterval(async () => {
                 const elapsed = Date.now() - startTime;
-                recordTimer.textContent = formatTime(elapsed);
+                const timeStr = formatTime(elapsed);
+                modalTimer.textContent = timeStr;
                 
                 if (elapsed >= 60000) {
                     console.log('[voice] auto stop at 60s');
@@ -626,16 +687,13 @@
                 }
             }, 100);
 
-            recordBtn.disabled = false;
-
         } catch (error) {
             console.error('[voice] Failed to start recording:', error);
-            recordingStatus.textContent = `Error: ${error.message}`;
-            recordingStatus.classList.add('text-red-600');
+            updateModalStatus(`Error: ${error.message}`);
             
             // Cleanup on error
             await cleanup();
-            recordBtn.disabled = false;
+            hideRecordingModal();
         }
     }
 
@@ -643,8 +701,7 @@
         if (!isRecording) return;
         
         isRecording = false;
-        updateButtonState(false);
-        recordingStatus.textContent = 'Processing...';
+        updateModalStatus('Processing your recording...');
         console.log('[voice] stopRecording invoked');
 
         try {
@@ -656,16 +713,14 @@
                 });
             }
 
-            // Upload full recording and get transcript in one request (before cleanup)
+            // Upload full recording and get transcript
             try {
                 if (!recordedChunks || recordedChunks.length === 0) {
                     throw new Error('no audio captured');
                 }
                 
-                // Try primary transcription method first
                 let transcriptionSuccess = false;
                 try {
-                    // Prefer WAV when ffmpeg is unavailable on server
                     let chosenMime = (mediaRecorder && mediaRecorder.mimeType) ? mediaRecorder.mimeType : '';
                     let ext = 'webm';
                     if (chosenMime.includes('wav')) {
@@ -675,12 +730,10 @@
                     } else if (chosenMime.includes('ogg')) {
                         ext = 'ogg';
                     }
-                    // If server lacks ffmpeg, WAV is safest; attempt to convert
-                    // Some browsers do not support WAV via MediaRecorder; if not, keep chosenMime
                     if (!chosenMime) {
                         chosenMime = 'audio/webm';
                     }
-                    // Convert to WAV in-browser to avoid server ffmpeg/librosa issues
+                    
                     const originalBlob = new Blob(recordedChunks, { type: chosenMime });
                     let wavBuffer = null;
                     if (fallbackProcessor) {
@@ -739,24 +792,29 @@
                 
                 if (!transcriptionSuccess) {
                     console.warn('[voice] All transcription methods failed');
-                    recordingStatus.textContent = 'Transcription failed - please try again';
+                    updateModalStatus('Transcription failed - try again');
+                } else {
+                    updateModalStatus('Complete');
                 }
                 
             } catch (err) {
                 console.error('[voice] Audio processing error:', err);
-                recordingStatus.textContent = 'Audio processing failed';
+                updateModalStatus('Processing failed');
             }
 
             await cleanup();
 
-            recordingStatus.textContent = 'Complete';
+            // Hide modal after showing status briefly
             setTimeout(() => {
-                recordingStatus.textContent = '';
-            }, 2000);
+                hideRecordingModal();
+            }, 1500);
 
         } catch (error) {
             console.error('Error stopping recording:', error);
-            recordingStatus.textContent = 'Error stopping recording';
+            updateModalStatus('Error stopping recording');
+            setTimeout(() => {
+                hideRecordingModal();
+            }, 2000);
         }
     }
 
@@ -790,7 +848,7 @@
         }
 
         // Reset UI
-        recordTimer.textContent = '00:00 / 01:00';
+        modalTimer.textContent = '00:00 / 01:00';
         clearCanvas();
         
         // Clean up references
@@ -800,30 +858,17 @@
         mediaRecorder = null;
     }
 
-    // Global function for button click (override safe default once ready)
-    window.toggleRecording = async function() {
-        if (isRecording) {
-            await stopRecording();
-        } else {
-            await startRecording();
-        }
-    };
-
-    // Initialize
-    window.addEventListener('resize', resizeCanvas);
-    resizeCanvas();
+    // Make functions globally accessible for buttons
+    window.startRecording = startRecording;
+    window.stopRecording = stopRecording;
     
-    // Test canvas drawing on load
-    setTimeout(() => {
-        clearCanvas();
-        // Draw a test line to verify canvas is working
-        canvasCtx.strokeStyle = '#e5e7eb';
-        canvasCtx.lineWidth = 1;
-        canvasCtx.beginPath();
-        canvasCtx.moveTo(0, canvas.height / (window.devicePixelRatio || 1) / 2);
-        canvasCtx.lineTo(canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1) / 2);
-        canvasCtx.stroke();
-    }, 100);
+    console.log('[voice] Functions exposed globally:', {
+        startRecording: typeof window.startRecording,
+        stopRecording: typeof window.stopRecording
+    });
+
+    // Initialize canvas
+    resizeCanvas();
 
 })();
 </script>
