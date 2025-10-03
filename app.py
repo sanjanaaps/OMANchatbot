@@ -11,7 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from app_lib.db import get_db, init_db
 from app_lib.models import db, User, Document, ChatMessage
 from app_lib.auth import login_required, get_current_user, check_password_hash
-from app_lib.extract import extract_text_from_file
+# Defer importing heavy document-processing helpers until they're needed
+# (they pull in optional packages like pytesseract, pandas, etc.)
+# We'll import `extract_text_from_file` lazily inside routes that need it.
 from app_lib.search import search_documents, get_document_summary
 from app_lib.gemini import query_gemini, translate_text, get_department_focus, get_department_focus_arabic
 from app_lib.difflib_responses import get_difflib_response
@@ -279,7 +281,9 @@ def upload():
             user_document_type = request.form.get('document_type', '').strip()
             
             try:
-                # Extract text from file
+                # Extract text from file (import lazily to avoid importing heavy optional
+                # dependencies during app startup)
+                from app_lib.extract import extract_text_from_file
                 extracted_text = extract_text_from_file(filepath)
                 
                 if not extracted_text.strip():
@@ -471,6 +475,7 @@ def reingest_document():
             return jsonify({"success": False, "error": "Document file not found"}), 404
         
         # Re-extract text from file
+        from app_lib.extract import extract_text_from_file
         extracted_text = extract_text_from_file(filepath)
         
         if not extracted_text.strip():
@@ -609,6 +614,7 @@ def chat():
                 
                 # Extract text from uploaded file
                 try:
+                    from app_lib.extract import extract_text_from_file
                     extracted_text = extract_text_from_file(filepath)
                     if extracted_text.strip():
                         # Add file content to message

@@ -57,8 +57,9 @@ class Document(db.Model):
     # Create indexes for better performance
     __table_args__ = (
         Index('idx_documents_department_upload_date', 'department', 'upload_date'),
-        Index('idx_documents_content_search', 'content', postgresql_using='gin'),
-        Index('idx_documents_filename_search', 'filename', postgresql_using='gin'),
+        # Note: GIN indexes on text columns require operator classes (pg_trgm or to_tsvector).
+        # The application creates full-text GIN indexes explicitly in init_database(),
+        # so avoid declaring raw GIN indexes here which can fail on some Postgres setups.
     )
     
     def __repr__(self):

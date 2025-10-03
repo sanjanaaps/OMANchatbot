@@ -34,14 +34,16 @@ def main():
         config_class = get_config()
         app.config.from_object(config_class)
         
-        # Initialize database
-        print("\n1. Initializing database...")
-        init_db(app)
-        print("   ✓ Database initialized successfully")
-        
-        # Seed users
-        print("\n2. Seeding test users...")
-        success = seed_users()
+        # Initialize database and seed users inside app context
+        with app.app_context():
+            # Initialize database
+            print("\n1. Initializing database...")
+            init_db(app)
+            print("   ✓ Database initialized successfully")
+
+            # Seed users
+            print("\n2. Seeding test users...")
+            success = seed_users()
         
         if success:
             print("   ✓ Test users created successfully")
