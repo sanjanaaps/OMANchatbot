@@ -64,7 +64,18 @@
                                 <span class="text-xs font-medium text-gray-600">AI Assistant</span>
                             </div>
                             {% endif %}
-                            <div class="px-6 py-4 rounded-3xl shadow-md {% if message.type == 'user' %}bg-ocb-blue text-white{% else %}bg-gray-100 text-gray-900{% endif %}">
+                            <div class="px-6 py-4 shadow-md {% if message.type == 'user' %}bg-ocb-blue text-white{% else %}bg-gray-100 text-gray-900{% endif %} relative">
+                                {% if message.timestamp %}
+                                <div class="text-xs {% if message.type == 'user' %}text-gray-200{% else %}text-gray-500{% endif %} mb-2">
+                                    {%- if message.timestamp is string -%}
+                                        {%- set hour = message.timestamp[11:13]|int -%}
+                                        {%- set display_hour = (hour % 12) if (hour % 12) != 0 else 12 -%}
+                                        {{ '%02d'|format(display_hour) }}:{{ message.timestamp[14:16] }} {{ 'PM' if hour >= 12 else 'AM' }}
+                                    {%- else -%}
+                                        {{ message.timestamp.strftime('%I:%M %p') }}
+                                    {%- endif -%}
+                                </div>
+                                {% endif %}
                                 <div class="text-sm prose prose-sm max-w-none {% if message.type == 'user' %}prose-invert{% endif %}">{{ message.content|markdown|safe }}</div>
                             </div>
                         </div>
@@ -333,8 +344,27 @@
                             }
                             
                             const contentDiv = document.createElement('div');
-                            contentDiv.className = `px-6 py-4 rounded-3xl shadow-md ${message.type === 'user' ? 'bg-ocb-blue text-white' : 'bg-gray-100 text-gray-900'}`;
-                            contentDiv.innerHTML = `<div class="text-sm prose prose-sm max-w-none ${message.type === 'user' ? 'prose-invert' : ''}">${marked.parse(message.content)}</div>`;
+                            contentDiv.className = `px-6 py-4 shadow-md ${message.type === 'user' ? 'bg-ocb-blue text-white' : 'bg-gray-100 text-gray-900'}`;
+                            
+                            let timeStr = '';
+                            if (message.timestamp) {
+                                if (typeof message.timestamp === 'string') {
+                                    // Extract time from ISO string and format it
+                                    const hours = parseInt(message.timestamp.substring(11, 13));
+                                    const minutes = message.timestamp.substring(14, 16);
+                                    const ampm = hours >= 12 ? 'PM' : 'AM';
+                                    const displayHours = hours % 12 || 12; // Convert 24h to 12h format
+                                    timeStr = `${String(displayHours).padStart(2, '0')}:${minutes} ${ampm}`;
+                                } else {
+                                    const time = new Date(message.timestamp);
+                                    timeStr = time.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                                }
+                            }
+                            
+                            contentDiv.innerHTML = `
+                                ${timeStr ? `<div class="text-xs ${message.type === 'user' ? 'text-gray-200' : 'text-gray-500'} mb-2">${timeStr}</div>` : ''}
+                                <div class="text-sm prose prose-sm max-w-none ${message.type === 'user' ? 'prose-invert' : ''}">${marked.parse(message.content)}</div>
+                            `;
                             
                             bubbleDiv.appendChild(contentDiv);
                             messageDiv.appendChild(bubbleDiv);
@@ -378,38 +408,94 @@
     // Handle form submission with file upload
     document.getElementById('chatForm').addEventListener('submit', async (e) => {
         e.preventDefault();
-        
         const message = messageTextarea.value.trim();
         const language = document.getElementById('language').value;
-        
         if (!message && !selectedFile) {
             alert('Please enter a message or upload a file');
             return;
         }
-        
         // Show loading state
         const submitBtn = e.target.querySelector('button[type="submit"]');
         const originalText = submitBtn.innerHTML;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sending...';
         submitBtn.disabled = true;
-        
         try {
             const formData = new FormData();
             formData.append('message', message);
             formData.append('language', language);
-            
             if (selectedFile) {
                 formData.append('file', selectedFile);
             }
-            
             const response = await fetch('/chat', {
                 method: 'POST',
                 body: formData
             });
-            
             if (response.ok) {
-                // Reload the page to show the new message
-                window.location.reload();
+                // After successful POST, fetch latest messages and update chat area
+                fetch('/api/chat-history/current')
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success && data.messages) {
+                            const messagesContainer = document.getElementById('chatMessages');
+                            messagesContainer.innerHTML = '';
+                            if (data.messages.length > 0) {
+                                data.messages.forEach(message => {
+                                    const messageDiv = document.createElement('div');
+                                    messageDiv.className = `flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`;
+                                    const bubbleDiv = document.createElement('div');
+                                    bubbleDiv.className = 'max-w-[70%]';
+                                    if (message.type === 'assistant') {
+                                        const labelDiv = document.createElement('div');
+                                        labelDiv.className = 'flex items-center mb-2 ml-1';
+                                        labelDiv.innerHTML = `
+                                            <i class="fas fa-robot text-ocb-blue mr-2"></i>
+                                            <span class="text-xs font-medium text-gray-600">AI Assistant</span>
+                                        `;
+                                        bubbleDiv.appendChild(labelDiv);
+                                    }
+                                    const contentDiv = document.createElement('div');
+                                    contentDiv.className = `px-6 py-4 shadow-md ${message.type === 'user' ? 'bg-ocb-blue text-white' : 'bg-gray-100 text-gray-900'} relative`;
+                                    let timeStr = '';
+                                    if (message.timestamp) {
+                                        if (typeof message.timestamp === 'string') {
+                                            // Extract time from ISO string and format it
+                                            const hours = parseInt(message.timestamp.substring(11, 13));
+                                            const minutes = message.timestamp.substring(14, 16);
+                                            const ampm = hours >= 12 ? 'PM' : 'AM';
+                                            const displayHours = hours % 12 || 12; // Convert 24h to 12h format
+                                            timeStr = `${String(displayHours).padStart(2, '0')}:${minutes} ${ampm}`;
+                                        } else {
+                                            const time = new Date(message.timestamp);
+                                            timeStr = time.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+                                        }
+                                    }
+                                    
+                                    contentDiv.innerHTML = `
+                                        ${timeStr ? `<div class="text-xs ${message.type === 'user' ? 'text-gray-200' : 'text-gray-500'} mb-2">${timeStr}</div>` : ''}
+                                        <div class="text-sm prose prose-sm max-w-none ${message.type === 'user' ? 'prose-invert' : ''}">${marked.parse(message.content)}</div>
+                                    `;
+                                    bubbleDiv.appendChild(contentDiv);
+                                    messageDiv.appendChild(bubbleDiv);
+                                    messagesContainer.appendChild(messageDiv);
+                                });
+                            } else {
+                                messagesContainer.innerHTML = `
+                                    <div class="text-center text-gray-500 py-12">
+                                        <i class="fas fa-comments text-4xl mb-4 text-gray-400"></i>
+                                        <p class="text-lg">Start a conversation with the AI assistant</p>
+                                        <p class="text-sm mt-2">Ask questions about your department's documents</p>
+                                    </div>
+                                `;
+                            }
+                            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                            // Clear message input and file
+                            messageTextarea.value = '';
+                            removeFileBtn.click();
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error updating chat messages:', error);
+                    });
             } else {
                 throw new Error('Failed to send message');
             }

@@ -47,6 +47,9 @@ def extract_text_from_file(file_path: str) -> str:
             return extract_text_from_docx(file_path)
         elif file_extension in ['.png', '.jpg', '.jpeg', '.tiff', '.bmp']:
             return extract_text_from_image(file_path)
+        elif file_extension == '.txt':
+            with open(file_path, 'r', encoding='utf-8') as file:
+                return file.read()
         else:
             raise ValueError(f"Unsupported file type: {file_extension}")
     

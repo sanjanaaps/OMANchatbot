@@ -1,17 +1,78 @@
 # Oman Central Bank - Department-Secure Document Analyzer & Chatbot
 
+## 🔄 Recent Updates
+
+### RAG (Retrieval-Augmented Generation) Integration
+- Implemented advanced RAG system with FAISS-based similarity search
+- Multi-format document support with OCR (PDF, PNG, JPG, JPEG, TIFF)
+- Automatic translation between English and Arabic
+- Department-aware document categorization
+- Real-time document indexing and querying
+- Intelligent response prioritization system
+
+### Chat UI and Experience
+- Session-based chat persistence
+- Real-time message updates with AJAX
+- Bilingual chat interface with timestamps
+- Enhanced mobile responsiveness
+- Progressive response system with fallbacks
+
+### Deployment and Infrastructure
+- Complete Apache production deployment system
+- Systemd service management for Node.js and Flask
+- Health monitoring and status endpoints
+- Comprehensive logging and error handling
+- SSL/HTTPS configuration with Let's Encrypt
+
+### Security and Performance
+- Strict department isolation and access control
+- Enhanced user session management
+- Audit logging for sensitive operations
+- Apache optimization for production
+- Firewall and security header configuration
+
+### Document Processing
+- Enhanced financial document analysis
+- Improved text extraction from complex PDFs
+- OCR support for English and Arabic documents
+- Automatic document categorization
+- Enhanced metadata extraction and indexing
+
 A Flask-based web application that provides secure document analysis and AI-powered chatbot functionality for different departments within the Oman Central Bank. Each user can only access documents from their assigned department, ensuring data confidentiality and security.
 
 ## 🚀 Features
 
 ### Core Functionality
+
+#### Department and Security
 - **Department-Secure Access**: Users can only view/search documents from their assigned department
+- **Authentication**: bcrypt-hashed passwords with session management
+- **Department Isolation**: Strict access control based on user department
+- **Audit Logging**: Track sensitive operations and document access
+
+#### Document Processing
 - **Document Upload**: Support for PDF, DOCX, DOC, and image files (PNG, JPG, JPEG, TIFF)
-- **Text Extraction**: Automatic text extraction from various file formats
-- **AI Summarization**: Extractive summarization using TextRank algorithm
-- **Local Search**: TF-IDF + cosine similarity search across department documents
-- **AI Chatbot**: Gemini API integration with fallback for complex queries
-- **Bilingual Support**: English and Arabic language support
+- **Text Extraction**: Advanced OCR with English and Arabic support
+- **Automatic Categorization**: Content-based department tagging
+- **Metadata Analysis**: Enhanced metadata extraction from documents
+
+#### Advanced RAG System
+- **Vector Search**: FAISS-based similarity search for relevant document chunks
+- **Context-Aware Responses**: Uses document content for accurate answers
+- **Intelligent Prioritization**: Multi-layer response system with fallbacks
+- **Real-time Indexing**: New documents immediately available for querying
+
+#### Search and AI
+- **Local Search**: TF-IDF + cosine similarity search across documents
+- **AI Chatbot**: Gemini API integration with RAG enhancement
+- **Fallback System**: Progressive degradation through multiple layers
+- **Query Analytics**: Track and analyze search patterns
+
+#### Language Support
+- **Bilingual Interface**: Complete English and Arabic support
+- **Automatic Translation**: Content translation between languages
+- **OCR Language Support**: Text extraction for both scripts
+- **Multilingual RAG**: Document processing in both languages
 
 ### Security Features
 - **Authentication**: bcrypt-hashed passwords with session management
@@ -121,24 +182,55 @@ The application will be available at `http://localhost:5000`
 
 ## 🔐 Security Considerations
 
-### Production Hardening (TODOs)
-- [ ] Use environment-specific configuration files
-- [ ] Implement rate limiting for API endpoints
-- [ ] Add CSRF protection
-- [ ] Use HTTPS in production
-- [ ] Implement proper logging and monitoring
-- [ ] Add input validation and sanitization
-- [ ] Use secure file storage (not local filesystem)
-- [ ] Implement backup and disaster recovery
-- [ ] Add audit logging for document access
-- [ ] Use PostgreSQL authentication and authorization
+### Production Implementation Status
 
-### Current Security Features
-- ✅ bcrypt password hashing
-- ✅ Session-based authentication
-- ✅ Department-based access control
-- ✅ File type validation
-- ✅ Secure file upload handling
+#### Completed Features ✅
+- **Security**
+  - ✅ bcrypt password hashing with secure salt
+  - ✅ Session-based authentication with timeout
+  - ✅ Department-based access control
+  - ✅ File type validation and sanitization
+  - ✅ Secure file upload handling
+  - ✅ Apache SSL/HTTPS configuration
+  - ✅ Security headers (XSS, CSRF, etc.)
+  
+- **Monitoring & Logging**
+  - ✅ Structured logging system
+  - ✅ Health check endpoints
+  - ✅ Error tracking and reporting
+  - ✅ API request logging
+  - ✅ Audit logging for document access
+  
+- **Infrastructure**
+  - ✅ Apache production configuration
+  - ✅ Systemd service management
+  - ✅ Backup system for files
+  - ✅ PostgreSQL database integration
+  
+#### Planned Enhancements 🚀
+- **Security Hardening**
+  - [ ] Implement IP-based rate limiting
+  - [ ] Add JWTs for API authentication
+  - [ ] Enable OAuth/SSO integration
+  - [ ] Implement MFA support
+  
+- **Infrastructure**
+  - [ ] Set up container orchestration
+  - [ ] Implement CDN for static assets
+  - [ ] Configure load balancing
+  - [ ] Add real-time metrics monitoring
+  
+- **Data Management**
+  - [ ] Implement distributed file storage
+  - [ ] Add automated database backups
+  - [ ] Set up data retention policies
+  - [ ] Enable cross-region replication
+  
+- **Performance**
+  - [ ] Implement response caching
+  - [ ] Add WebSocket support
+  - [ ] Optimize static asset delivery
+  - [ ] Enable database query caching
 
 ## 🎯 Usage
 
@@ -197,28 +289,94 @@ POSTGRES_URI = "postgresql://user:pass@host:5432/doc_analyzer"  # Production Pos
 pytest tests/
 ```
 
-## 🚀 Deployment
+## 🚀 Production Deployment
 
-### Development
+### Deployment Architecture
+
+```
+Internet → Apache (Port 80/443) → React Frontend
+                                → Node.js API (Port 3001) → Flask Backend (Port 5000)
+```
+
+### Quick Start Deployment
+
+1. **Linux/Ubuntu:**
 ```bash
-python app.py
+# Run the automated deployment script
+sudo chmod +x deploy_apache.sh
+sudo ./deploy_apache.sh
+
+# Or use the management script
+sudo python3 apache_management.py setup
+sudo python3 apache_management.py deploy
 ```
 
-### Production
+2. **Windows:**
+```powershell
+# Run as Administrator
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+.\setup_apache_windows.ps1
+```
+
+### Apache Configuration
+
+1. **Install Apache and Dependencies:**
 ```bash
-gunicorn -w 4 -b 0.0.0.0:5000 app:app
+# Ubuntu/Debian
+sudo apt update
+sudo apt install apache2 nodejs npm python3 python3-pip python3-venv
 ```
 
-### Docker (Optional)
-```dockerfile
-FROM python:3.9-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-EXPOSE 5000
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
+2. **Enable Required Modules:**
+```bash
+sudo a2enmod rewrite headers deflate expires proxy proxy_http
 ```
+
+3. **Configure Virtual Host:**
+- Create `cbo-chatbot.conf` with provided configuration
+- Enable the site and restart Apache
+
+4. **Setup SSL/HTTPS:**
+```bash
+# Using Let's Encrypt
+sudo apt install certbot python3-certbot-apache
+sudo certbot --apache -d yourdomain.com
+```
+
+### Service Management
+
+**Enable and Start Services:**
+```bash
+sudo systemctl enable cbo-api.service
+sudo systemctl enable cbo-flask.service
+sudo systemctl start cbo-api.service
+sudo systemctl start cbo-flask.service
+```
+
+### Monitoring and Maintenance
+
+1. **Check Services:**
+```bash
+# View service logs
+sudo journalctl -u cbo-api.service -f
+sudo journalctl -u cbo-flask.service -f
+```
+
+2. **Apache Management:**
+```bash
+sudo systemctl status apache2
+sudo apache2ctl configtest
+```
+
+3. **Backup System:**
+```bash
+# Regular backups
+DIR="/var/backups/cbo-chatbot/$(date +%Y%m%d)"
+mkdir -p $DIR
+cp -r /var/www/cbo-chatbot* $DIR/
+```
+
+For detailed deployment instructions and troubleshooting, see `APACHE_DEPLOYMENT.md`.
 
 ## 📊 API Endpoints
 

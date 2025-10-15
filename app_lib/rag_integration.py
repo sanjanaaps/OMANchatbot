@@ -106,13 +106,9 @@ class DepartmentTagger:
     """Department tagging based on content analysis"""
     
     def __init__(self):
-        self.keywords = {
-            "Finance": ["budget", "revenue", "expense", "finance", "financial", "accounting", "monetary"],
-            "Currency": ["banknotes", "coins", "mint", "currency", "exchange", "rate", "foreign"],
-            "IT / Finance": ["network", "software", "hardware", "technology", "it", "digital", "system"],
-            "Legal & Compliance": ["regulation", "law", "compliance", "legal", "policy", "framework"],
-            "Monetary Policy & Banking": ["policy", "banking", "supervision", "stability", "monetary"]
-        }
+        # Use standardized keywords from gemini.py
+        from app_lib.gemini import DEPARTMENT_KEYWORDS
+        self.keywords = DEPARTMENT_KEYWORDS
 
     def tag(self, text: str) -> List[str]:
         """Tag document with relevant departments"""

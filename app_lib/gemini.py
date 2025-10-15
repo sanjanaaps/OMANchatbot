@@ -1,37 +1,99 @@
 import os
-import requests
-import json
 import logging
+import time
 from typing import Optional, List
+import google.generativeai as genai
 from app_lib.extract import chunk_text
+from deep_translator import GoogleTranslator
 
 logger = logging.getLogger(__name__)
 
-# Gemini API configuration
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent"
+def configure_gemini():
+    """Configure Gemini API with current environment variables"""
+    GOOGLE_API_KEY = os.environ.get('GEMINI_API_KEY')  # For backward compatibility
+    if not GOOGLE_API_KEY:
+        GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY')
+    
+    if not GOOGLE_API_KEY:
+        logger.error("No Gemini API key found in environment variables")
+        return None
+        
+    genai.configure(api_key=GOOGLE_API_KEY)
+    return genai.GenerativeModel('models/gemini-pro-latest')
+
+# Initialize model
+model = configure_gemini()
+
+DEPARTMENT_KEYWORDS = {
+    'Finance': [
+        'financial planning', 'budgeting', 'accounting', 'financial reporting',
+        'revenue', 'expense', 'finance', 'financial', 'treasury', 'investment'
+    ],
+    'Monetary Policy & Banking': [
+        'monetary policy', 'banking supervision', 'financial stability', 'policy',
+        'banking', 'supervision', 'stability', 'monetary', 'interest rates',
+        'economic analysis'
+    ],
+    'Currency': [
+        'banknotes', 'coins', 'mint', 'currency', 'rial', 'exchange',
+        'foreign exchange', 'currency management', 'exchange rate', 'forex',
+        'currency operations'
+    ],
+    'Legal & Compliance': [
+        'legal frameworks', 'regulatory compliance', 'risk management',
+        'regulation', 'law', 'compliance', 'legal', 'policy', 'framework',
+        'governance'
+    ],
+    'IT / Finance': [
+        'information technology', 'financial technology', 'digital banking',
+        'network', 'software', 'hardware', 'technology', 'it', 'digital',
+        'system', 'security'
+    ]
+}
 
 def get_department_focus(department):
     """Get department focus areas in English"""
-    focus_areas = {
-        'Finance': 'financial planning, budgeting, accounting, and financial reporting',
-        'Monetary Policy & Banking': 'monetary policy formulation, banking supervision, and financial stability',
-        'Currency': 'currency management, exchange rate policies, and currency operations',
-        'Legal & Compliance': 'legal frameworks, regulatory compliance, and risk management',
-        'IT / Finance': 'information technology systems, financial technology, and digital banking'
-    }
-    return focus_areas.get(department, 'departmental operations and policies')
+    if department not in DEPARTMENT_KEYWORDS:
+        return 'departmental operations and policies'
+    
+    return ', '.join(DEPARTMENT_KEYWORDS[department][:4]) + ', and ' + \
+           DEPARTMENT_KEYWORDS[department][4]
+
+DEPARTMENT_KEYWORDS_ARABIC = {
+    'Finance': [
+        'التخطيط المالي', 'الميزانيات', 'المحاسبة', 'التقارير المالية',
+        'الإيرادات', 'المصروفات', 'المالية', 'الخزينة', 'الاستثمار',
+        'التحليل المالي'
+    ],
+    'Monetary Policy & Banking': [
+        'السياسة النقدية', 'الإشراف المصرفي', 'الاستقرار المالي',
+        'السياسة', 'العمل المصرفي', 'الإشراف', 'الاستقرار', 'النقدي',
+        'أسعار الفائدة', 'التحليل الاقتصادي'
+    ],
+    'Currency': [
+        'الأوراق النقدية', 'العملات المعدنية', 'سك العملة', 'العملة',
+        'الريال', 'الصرف', 'صرف العملات الأجنبية', 'إدارة العملة',
+        'سعر الصرف', 'العمليات النقدية'
+    ],
+    'Legal & Compliance': [
+        'الأطر القانونية', 'الامتثال التنظيمي', 'إدارة المخاطر',
+        'التنظيم', 'القانون', 'الامتثال', 'القانوني', 'السياسة',
+        'الإطار التنظيمي', 'الحوكمة'
+    ],
+    'IT / Finance': [
+        'تكنولوجيا المعلومات', 'التكنولوجيا المالية', 'الخدمات المصرفية الرقمية',
+        'الشبكات', 'البرمجيات', 'الأجهزة', 'التكنولوجيا', 'تقنية المعلومات',
+        'الرقمية', 'النظام', 'الأمن'
+    ]
+}
 
 def get_department_focus_arabic(department):
     """Get department focus areas in Arabic"""
-    focus_areas = {
-        'Finance': 'التخطيط المالي والميزانيات والمحاسبة والتقارير المالية',
-        'Monetary Policy & Banking': 'صياغة السياسة النقدية والإشراف المصرفي والاستقرار المالي',
-        'Currency': 'إدارة العملة وسياسات سعر الصرف وعمليات العملة',
-        'Legal & Compliance': 'الأطر القانونية والامتثال التنظيمي وإدارة المخاطر',
-        'IT / Finance': 'أنظمة تكنولوجيا المعلومات والتكنولوجيا المالية والخدمات المصرفية الرقمية'
-    }
-    return focus_areas.get(department, 'عمليات وسياسات القسم')
+    if department not in DEPARTMENT_KEYWORDS_ARABIC:
+        return 'عمليات وسياسات القسم'
+    
+    keywords = DEPARTMENT_KEYWORDS_ARABIC[department]
+    return ' و'.join([', '.join(keywords[:4]), keywords[4]])
 
 def query_gemini(prompt: str, department: str, language: str = 'en', context: str = "") -> str:
     """
@@ -46,7 +108,13 @@ def query_gemini(prompt: str, department: str, language: str = 'en', context: st
     Returns:
         Gemini API response
     """
-    if not GEMINI_API_KEY:
+    global model
+    
+    # Refresh configuration if needed
+    if not model:
+        model = configure_gemini()
+    
+    if not model:
         # Return a helpful response based on the query
         if language == 'ar':
             if "oman central bank" in prompt.lower() or "البنك المركزي العماني" in prompt.lower():
@@ -63,225 +131,64 @@ def query_gemini(prompt: str, department: str, language: str = 'en', context: st
             else:
                 return f"Hello! I'm your AI assistant for the {department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
     
-    # Prepare the prompt with department context
-    system_prompt = f"""You are an AI assistant for the {department} department at Oman Central Bank. 
-You are knowledgeable about {department} matters and can provide helpful information and guidance.
-
-Current query: {prompt}"""
-    
-    if context:
-        system_prompt += f"\n\nRelevant context from department documents:\n{context}"
-    
-    # Add language instruction
-    if language == 'ar':
-        system_prompt += "\n\nPlease respond in Arabic."
-    
     try:
-        headers = {
-            'Content-Type': 'application/json',
-        }
+        # Prepare system context and user query
+        messages = [
+            f"""You are a specialized AI assistant in the {department} department at Oman Central Bank. Focus on providing specific, factual answers based on the provided document content only.""",
+            f"""Here is the document to analyze:
+
+{context}
+
+Answer this question about the document: {prompt}
+
+Remember:
+1. Use only information found in the document above
+2. Be specific and factual
+3. If the answer isn't in the document, say so
+4. Do not include any generic introductions or pleasantries"""
+        ]
+
+        # Add language instruction
+        if language == 'ar':
+            messages[0] += "\n\nPlease respond in Arabic."
         
-        data = {
-            "contents": [{
-                "parts": [{
-                    "text": system_prompt
-                }]
-            }],
-            "generationConfig": {
-                "temperature": 0.7,
-                "topK": 40,
-                "topP": 0.95,
-                "maxOutputTokens": 2048,
-            }
-        }
-        
-        response = requests.post(
-            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-            headers=headers,
-            json=data,
-            timeout=30
+        # Configure generation parameters
+        generation_config = genai.types.GenerationConfig(
+            temperature=0.7,
+            top_p=0.95,
+            top_k=40,
+            max_output_tokens=2048,
         )
         
-        response.raise_for_status()
+        # Log the request
+        logger.debug(f"Sending request to Gemini")
         
-        result = response.json()
-        
-        if 'candidates' in result and len(result['candidates']) > 0:
-            content = result['candidates'][0]['content']['parts'][0]['text']
-            return content.strip()
-        else:
-            logger.error(f"Unexpected Gemini API response: {result}")
-            return "I'm sorry, I couldn't process your request at the moment. Please try again."
-    
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Gemini API request failed: {str(e)}")
-        # Return a helpful response based on the query
-        if language == 'ar':
-            if "oman central bank" in prompt.lower() or "البنك المركزي العماني" in prompt.lower():
-                return f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {department}، نركز على {get_department_focus_arabic(department)}. كيف يمكنني مساعدتك أكثر؟"
-            elif "finance report" in prompt.lower() or "تقرير مالي" in prompt.lower():
-                return f"تقرير مالي 2023: في قسم {department}، نركز على {get_department_focus_arabic(department)}. يمكنني مساعدتك في تحليل التقارير المالية والميزانيات والتقارير المحاسبية. ما هو السؤال المحدد الذي لديك حول التقرير المالي؟"
-            else:
-                return f"مرحباً! أنا مساعدك الذكي في قسم {department} في البنك المركزي العماني. أسعد لمساعدتك في أي أسئلة لديك حول عملك أو شؤون القسم."
-        else:
-            if "oman central bank" in prompt.lower():
-                return f"The Central Bank of Oman (CBO) is the central bank of the Sultanate of Oman, established in 1974. It is headquartered in Muscat and manages the country's monetary policy. In the {department} department, we focus on {get_department_focus(department)}. How can I assist you further?"
-            elif "finance report" in prompt.lower():
-                return f"Finance Report 2023: In the {department} department, we focus on {get_department_focus(department)}. I can help you analyze financial reports, budgets, and accounting statements. What specific question do you have about the finance report?"
-            else:
-                return f"Hello! I'm your AI assistant for the {department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse Gemini API response: {str(e)}")
-        # Return a helpful response based on the query
-        if language == 'ar':
-            if "oman central bank" in prompt.lower() or "البنك المركزي العماني" in prompt.lower():
-                return f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {department}، نركز على {get_department_focus_arabic(department)}. كيف يمكنني مساعدتك أكثر؟"
-            else:
-                return f"مرحباً! أنا مساعدك الذكي في قسم {department} في البنك المركزي العماني. أسعد لمساعدتك في أي أسئلة لديك حول عملك أو شؤون القسم."
-        else:
-            if "oman central bank" in prompt.lower():
-                return f"The Central Bank of Oman (CBO) is the central bank of the Sultanate of Oman, established in 1974. It is headquartered in Muscat and manages the country's monetary policy. In the {department} department, we focus on {get_department_focus(department)}. How can I assist you further?"
-            else:
-                return f"Hello! I'm your AI assistant for the {department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
-    except Exception as e:
-        logger.error(f"Unexpected error querying Gemini: {str(e)}")
-        # Return a helpful response based on the query
-        if language == 'ar':
-            if "oman central bank" in prompt.lower() or "البنك المركزي العماني" in prompt.lower():
-                return f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {department}، نركز على {get_department_focus_arabic(department)}. كيف يمكنني مساعدتك أكثر؟"
-            else:
-                return f"مرحباً! أنا مساعدك الذكي في قسم {department} في البنك المركزي العماني. أسعد لمساعدتك في أي أسئلة لديك حول عملك أو شؤون القسم."
-        else:
-            if "oman central bank" in prompt.lower():
-                return f"The Central Bank of Oman (CBO) is the central bank of the Sultanate of Oman, established in 1974. It is headquartered in Muscat and manages the country's monetary policy. In the {department} department, we focus on {get_department_focus(department)}. How can I assist you further?"
-            else:
-                return f"Hello! I'm your AI assistant for the {department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
-
-def translate_text(text: str, target_language: str = 'ar') -> str:
-    """
-    Translate text using local GoogleTranslator (no API key required)
-    
-    Args:
-        text: Text to translate
-        target_language: Target language code ('ar' for Arabic, 'en' for English)
-        
-    Returns:
-        Translated text
-    """
-    if not text or not text.strip():
-        return text
-    
-    try:
-        from deep_translator import GoogleTranslator
-        
-        # Handle large texts by chunking
-        if len(text) > 4000:
-            chunks = chunk_text(text, chunk_size=4000, overlap=200)
-            translated_chunks = []
-            
-            for chunk in chunks:
-                translated_chunk = _translate_chunk_local(chunk, target_language)
-                translated_chunks.append(translated_chunk)
-            
-            return ' '.join(translated_chunks)
-        else:
-            return _translate_chunk_local(text, target_language)
-            
-    except ImportError:
-        logger.warning("deep_translator not available, falling back to Gemini API")
-        return _translate_text_gemini(text, target_language)
-    except Exception as e:
-        logger.warning(f"Local translation failed: {str(e)}, falling back to Gemini API")
-        return _translate_text_gemini(text, target_language)
-
-def _translate_text_gemini(text: str, target_language: str = 'ar') -> str:
-    """
-    Fallback translation using Gemini API (original implementation)
-    """
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY environment variable not set")
-    
-    if not text or not text.strip():
-        return text
-    
-    # Handle large texts by chunking
-    if len(text) > 3000:
-        chunks = chunk_text(text, chunk_size=3000, overlap=200)
-        translated_chunks = []
-        
-        for chunk in chunks:
-            translated_chunk = _translate_chunk(chunk, target_language)
-            translated_chunks.append(translated_chunk)
-        
-        return ' '.join(translated_chunks)
-    else:
-        return _translate_chunk(text, target_language)
-
-def _translate_chunk_local(text: str, target_language: str) -> str:
-    """
-    Translate a chunk of text using local GoogleTranslator
-    """
-    try:
-        from deep_translator import GoogleTranslator
-        
-        if target_language == 'ar':
-            translator = GoogleTranslator(source='auto', target='ar')
-        elif target_language == 'en':
-            translator = GoogleTranslator(source='auto', target='en')
-        else:
-            translator = GoogleTranslator(source='auto', target=target_language)
-        
-        return translator.translate(text)
-    except Exception as e:
-        logger.error(f"Local translation error: {str(e)}")
-        return text  # Return original text if translation fails
-
-def _translate_chunk(text: str, target_language: str) -> str:
-    """Translate a single chunk of text"""
-    language_name = "Arabic" if target_language == 'ar' else "English"
-    
-    prompt = f"Translate the following text to {language_name}. Only return the translation, no additional text:\n\n{text}"
-    
-    try:
-        headers = {
-            'Content-Type': 'application/json',
-        }
-        
-        data = {
-            "contents": [{
-                "parts": [{
-                    "text": prompt
-                }]
-            }],
-            "generationConfig": {
-                "temperature": 0.3,
-                "topK": 40,
-                "topP": 0.95,
-                "maxOutputTokens": 1024,
-            }
-        }
-        
-        response = requests.post(
-            f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
-            headers=headers,
-            json=data,
-            timeout=30
+        # Generate response
+        response = model.generate_content(
+            "\n\n".join(messages),
+            generation_config=generation_config
         )
         
-        response.raise_for_status()
+        # Log response details
+        logger.debug("Received response from Gemini")
         
-        result = response.json()
-        
-        if 'candidates' in result and len(result['candidates']) > 0:
-            content = result['candidates'][0]['content']['parts'][0]['text']
-            return content.strip()
+        # Check if we got a valid response
+        if response and hasattr(response, 'text'):
+            content = response.text.strip()
+            
+            # Check for generic responses
+            if "Hello! I'm your AI assistant" in content or "How can I assist you today" in content:
+                logger.warning("Received generic response from Gemini")
+                return content
+            
+            return content
         else:
-            logger.error(f"Unexpected Gemini translation response: {result}")
-            return text  # Return original text if translation fails
-    
+            logger.error("Empty response from Gemini")
+            return "I apologize, but I couldn't generate a proper response at the moment. Please try again."
+            
     except Exception as e:
-        logger.error(f"Translation failed: {str(e)}")
-        return text  # Return original text if translation fails
+        logger.error(f"Error querying Gemini: {str(e)}")
+        return f"I apologize, but I encountered an error: {str(e)}"
 
 def analyze_document_with_gemini(document_content: str, department: str, language: str = 'en') -> dict:
     """
@@ -293,11 +200,8 @@ def analyze_document_with_gemini(document_content: str, department: str, languag
         language: Response language
         
     Returns:
-        Analysis results
+        Analysis results with key topics, themes, facts, and summary
     """
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY environment variable not set")
-    
     # Chunk large documents
     if len(document_content) > 3000:
         chunks = chunk_text(document_content, chunk_size=3000, overlap=200)
@@ -337,38 +241,125 @@ Document content:
             'department': department
         }
 
-def generate_department_insights(department: str, language: str = 'en') -> str:
+def translate_text(text: str, target_language: str = 'ar') -> str:
     """
-    Generate general insights for a department
+    Translate text using local GoogleTranslator (falling back to Gemini if needed)
     
     Args:
-        department: Department name
-        language: Response language
+        text: Text to translate
+        target_language: Target language code ('ar' for Arabic, 'en' for English)
         
     Returns:
-        Generated insights
+        Translated text
     """
-    prompt = f"""Provide general insights and key focus areas for the {department} department at a central bank. 
-Include current trends, regulatory considerations, and best practices."""
-    
-    if language == 'ar':
-        prompt += "\n\nPlease respond in Arabic."
+    if not text or not text.strip():
+        return text
     
     try:
-        return query_gemini(prompt, department, language)
+        # Handle large texts by chunking
+        if len(text) > 4000:
+            chunks = chunk_text(text, chunk_size=4000, overlap=200)
+            translated_chunks = []
+            
+            for chunk in chunks:
+                translated_chunk = _translate_chunk_local(chunk, target_language)
+                translated_chunks.append(translated_chunk)
+            
+            return ' '.join(translated_chunks)
+        else:
+            return _translate_chunk_local(text, target_language)
+            
     except Exception as e:
-        logger.error(f"Failed to generate insights for {department}: {str(e)}")
-        return f"Insights generation failed: {str(e)}"
+        logger.warning(f"Local translation failed: {str(e)}, falling back to Gemini API")
+        return _translate_text_gemini(text, target_language)
 
-def validate_api_key() -> bool:
-    """Validate if Gemini API key is working"""
-    if not GEMINI_API_KEY:
-        return False
+def _translate_chunk_local(text: str, target_language: str, max_retries: int = 3) -> str:
+    """
+    Translate a chunk of text using local GoogleTranslator with retry mechanism
     
-    try:
-        # Simple test query
-        test_response = query_gemini("Hello, this is a test.", "IT / Finance", "en")
-        return bool(test_response and len(test_response.strip()) > 0)
-    except Exception as e:
-        logger.error(f"API key validation failed: {str(e)}")
-        return False
+    Args:
+        text: Text to translate
+        target_language: Target language code
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        Translated text or original text if all retries fail
+    """
+    for attempt in range(max_retries):
+        try:
+            if target_language == 'ar':
+                translator = GoogleTranslator(source='auto', target='ar')
+            elif target_language == 'en':
+                translator = GoogleTranslator(source='auto', target='en')
+            else:
+                translator = GoogleTranslator(source='auto', target=target_language)
+            
+            translated = translator.translate(text)
+            if translated and translated.strip():
+                return translated
+            else:
+                logger.warning(f"Empty translation result on attempt {attempt + 1}")
+                continue
+                
+        except Exception as e:
+            logger.error(f"Local translation error on attempt {attempt + 1}: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(1)  # Wait before retrying
+                continue
+            else:
+                return text  # Return original text after all retries fail
+
+def _translate_text_gemini(text: str, target_language: str = 'ar', max_retries: int = 3) -> str:
+    """
+    Fallback translation using Gemini API with retry mechanism
+    
+    Args:
+        text: Text to translate
+        target_language: Target language code ('ar' for Arabic, 'en' for English)
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        Translated text or original text if all retries fail
+    """
+    global model
+    if not model:
+        model = configure_gemini()
+    
+    if not text or not text.strip():
+        return text
+    
+    for attempt in range(max_retries):
+        try:
+            target_language_name = "Arabic" if target_language == 'ar' else "English"
+            prompt = f"Translate the following text to {target_language_name}. Only return the translation, no additional text:\n\n{text}"
+            
+            # Generate translation
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.3,
+                    top_k=40,
+                    top_p=0.95,
+                    max_output_tokens=2048,
+                )
+            )
+            
+            if response and response.text and response.text.strip():
+                return response.text.strip()
+            else:
+                logger.warning(f"Empty Gemini translation response on attempt {attempt + 1}")
+                if attempt < max_retries - 1:
+                    time.sleep(1)  # Wait before retrying
+                    continue
+                return text
+                
+        except Exception as e:
+            logger.error(f"Gemini translation failed on attempt {attempt + 1}: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(1)  # Wait before retrying
+                # Try to refresh the model if there's an API error
+                if "api" in str(e).lower():
+                    model = configure_gemini()
+                continue
+            else:
+                return text

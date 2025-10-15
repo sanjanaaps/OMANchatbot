@@ -345,6 +345,8 @@ def upload():
                 logger.info(f"🏢 Department: {user.department}")
                 
                 if rag_system and rag_system.is_ready():
+                    extracted_text = None
+                    uploaded_file = None
                     try:
                         # Use RAG system to generate summary using the appropriate prompt template
                         logger.info(f"🤖 RAG system is ready, generating summary...")
@@ -371,6 +373,45 @@ def upload():
                         
                         rag_summary, rag_summary_en = query_rag(prompt, 'en', user.department)
                         logger.info(f"📤 RAG system response received (length: {len(rag_summary) if rag_summary else 0} chars)")
+                        if not response:
+                            logger.info(f"🌐 Trying Gemini API fallback for: '{message[:50]}{'...' if len(message) > 50 else ''}'")
+                        # Use Gemini fallback for general questions
+                        try:
+                            response = query_gemini(message, user.department, language, extracted_text if extracted_text else "")
+                            # Check if we got a generic response from Gemini
+                            if "Hello! I'm your AI assistant" in response or "How can I assist you today" in response:
+                                raise Exception("Got generic response from Gemini")
+                            response_source = "Gemini API"
+                            logger.info(f"🤖 Gemini Response: Generated AI response for query")
+                            logger.debug(f"Gemini Response length: {len(response)} characters")
+                        except Exception as e:
+                            logger.error(f"❌ Gemini API error: {str(e)}")
+                            logger.info(f"⚠️ Gemini failed, trying difflib fallback...")
+                            # Use difflib as fallback for simple questions
+                            try:
+                                response = get_difflib_response(message, user.department, language)
+                                response_source = "Difflib Fallback"
+                                logger.info(f"🔤 Difflib Response: Pattern matching fallback for query")
+                            except Exception as difflib_error:
+                                logger.error(f"❌ Difflib fallback error: {str(difflib_error)}")
+                                logger.info(f"⚠️ All AI services failed, using hardcoded fallback...")
+                                # Final fallback - provide department-specific helpful responses
+                                response_source = "Hardcoded Fallback"
+                                if language == 'ar':
+                                    if "oman central bank" in message.lower() or "البنك المركزي العماني" in message.lower():
+                                        response = f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {user.department}، نركز على {get_department_focus_arabic(user.department)}. كيف يمكنني مساعدتك أكثر؟"
+                                    elif "finance report" in message.lower() or "تقرير مالي" in message.lower():
+                                        response = f"تقرير مالي 2023: في قسم {user.department}، نركز على {get_department_focus_arabic(user.department)}. يمكنني مساعدتك في تحليل التقارير المالية والميزانيات والتقارير المحاسبية. ما هو السؤال المحدد الذي لديك حول التقرير المالي؟"
+                                    else:
+                                        response = f"مرحباً! أنا مساعدك الذكي في قسم {user.department} في البنك المركزي العماني. أسعد لمساعدتك في أي أسئلة لديك حول عملك أو شؤون القسم. كيف يمكنني مساعدتك اليوم؟"
+                                else:
+                                    if "oman central bank" in message.lower():
+                                        response = f"The Central Bank of Oman (CBO) is the central bank of the Sultanate of Oman, established in 1974. It is headquartered in Muscat and manages the country's monetary policy. In the {user.department} department, we focus on {get_department_focus(user.department)}. How can I assist you further?"
+                                    elif "finance report" in message.lower():
+                                        response = f"Finance Report 2023: In the {user.department} department, we focus on {get_department_focus(user.department)}. I can help you analyze financial reports, budgets, and accounting statements. What specific question do you have about the finance report?"
+                                    else:
+                                        response = f"Hello! I'm your AI assistant for the {user.department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
+                                logger.info(f"🔧 Hardcoded Fallback Response: Department-specific template response")
                         
                         # Translate English summary to Arabic instead of generating separately
                         logger.info(f"🌐 Translating summary to Arabic...")
@@ -593,13 +634,34 @@ def reingest_document():
 @login_required
 def chat():
     user = get_current_user()
-    
+    response = None
+    response_source = None
+    uploaded_file = None
+    extracted_text = None
+
     if request.method == 'POST':
         message = request.form.get('message', '').strip()
         language = request.form.get('language', 'en')
         
+        # Save user message to session
+        user_message_data = {
+            'id': f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}",
+            'chat_id': session.get('current_chat_id'),
+            'type': 'user',
+            'content': message,
+            'language': language,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Initialize chat messages list if not exists
+        if 'chat_messages' not in session:
+            session['chat_messages'] = []
+        
+        # Add user message to session
+        session['chat_messages'].append(user_message_data)
+        session.modified = True
+        
         # Handle file upload if present
-        uploaded_file = None
         if 'file' in request.files:
             file = request.files['file']
             if file and file.filename and allowed_file(file.filename):
@@ -607,55 +669,74 @@ def chat():
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 file.save(filepath)
                 
+                # Update user message with file information
+                session['chat_messages'][-1]['content'] = f"Question: {message}\n\nAttached document: {filename}"
+                session.modified = True
                 # Extract text from uploaded file
                 try:
                     extracted_text = extract_text_from_file(filepath)
                     if extracted_text.strip():
-                        # Add file content to message
-                        if message:
-                            message += f"\n\n[Attached file: {filename}]\n{extracted_text[:1000]}..."
-                        else:
-                            message = f"Please analyze this file: {filename}\n\n{extracted_text[:1000]}..."
                         uploaded_file = filename
                     else:
                         flash('No text could be extracted from the uploaded file', 'error')
+                        os.remove(filepath)
+                        extracted_text = None
                 except Exception as e:
                     logger.error(f"Error processing uploaded file {filename}: {str(e)}")
                     flash(f'Error processing uploaded file: {str(e)}', 'error')
                     os.remove(filepath)
+                    extracted_text = None
             elif file and file.filename:
                 flash('Invalid file type. Allowed types: PDF, DOCX, DOC, PNG, JPG, JPEG, TIFF', 'error')
-        
-        if message:
-            # Initialize session data if not exists
-            if 'chat_messages' not in session:
-                session['chat_messages'] = []
-            if 'chat_history' not in session:
-                session['chat_history'] = []
-            
-            # Generate unique chat ID for this conversation
-            if not session.get('current_chat_id'):
-                session['current_chat_id'] = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{user.id}"
-            
-            chat_id = session['current_chat_id']
-            
-            # Save user message to session
-            user_message_data = {
-                'id': f"msg_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}",
-                'chat_id': chat_id,
-                'type': 'user',
-                'content': message,
-                'language': language,
-                'timestamp': datetime.now().isoformat(),
-                'attached_file': uploaded_file
-            }
-            session['chat_messages'].append(user_message_data)
+
+        # ...existing code...
+
+        # If we have extracted text, try Gemini first with the document context
+        if extracted_text and not response:
+            logger.info(f"🌐 Trying Gemini API with document context for: '{message[:50]}{'...' if len(message) > 50 else ''}'")
+            try:
+                response = query_gemini(message, user.department, language, extracted_text)
+                if "Hello! I'm your AI assistant" in response or "How can I assist you today" in response:
+                    raise Exception("Got generic response from Gemini")
+                response_source = "Gemini API with Document"
+                logger.info(f"🤖 Gemini Response: Generated AI response with document context")
+                logger.debug(f"Gemini Response length: {len(response)} characters")
+            except Exception as e:
+                logger.error(f"❌ Gemini API error: {str(e)}")
+                logger.info(f"⚠️ Gemini failed, trying difflib fallback...")
+                try:
+                    response = get_difflib_response(message, user.department, language)
+                    response_source = "Difflib Fallback"
+                    logger.info(f"🔤 Difflib Response: Pattern matching fallback for query")
+                except Exception as difflib_error:
+                    logger.error(f"❌ Difflib fallback error: {str(difflib_error)}")
+                    logger.info(f"⚠️ All AI services failed, using hardcoded fallback...")
+                    response_source = "Hardcoded Fallback"
+                    if language == 'ar':
+                        if "oman central bank" in message.lower() or "البنك المركزي العماني" in message.lower():
+                            response = f"البنك المركزي العماني هو البنك المركزي لسلطنة عمان، تأسس في عام 1974. يقع مقره الرئيسي في مسقط ويدير السياسة النقدية للبلاد. في قسم {user.department}، نركز على {get_department_focus_arabic(user.department)}. كيف يمكنني مساعدتك أكثر؟"
+                        elif "finance report" in message.lower() or "تقرير مالي" in message.lower():
+                            response = f"تقرير مالي 2023: في قسم {user.department}، نركز على {get_department_focus_arabic(user.department)}. يمكنني مساعدتك في تحليل التقارير المالية والميزانيات والتقارير المحاسبية. ما هو السؤال المحدد الذي لديك حول التقرير المالي؟"
+                        else:
+                            response = f"مرحباً! أنا مساعدك الذكي في قسم {user.department} في البنك المركزي العماني. أسعد لمساعدتك في أي أسئلة لديك حول عملك أو شؤون القسم. كيف يمكنني مساعدتك اليوم؟"
+                    else:
+                        if "oman central bank" in message.lower():
+                            response = f"The Central Bank of Oman (CBO) is the central bank of the Sultanate of Oman, established in 1974. It is headquartered in Muscat and manages the country's monetary policy. In the {user.department} department, we focus on {get_department_focus(user.department)}. How can I assist you further?"
+                        elif "finance report" in message.lower():
+                            response = f"Finance Report 2023: In the {user.department} department, we focus on {get_department_focus(user.department)}. I can help you analyze financial reports, budgets, and accounting statements. What specific question do you have about the finance report?"
+                        else:
+                            response = f"Hello! I'm your AI assistant for the {user.department} department at Oman Central Bank. I'm here to help you with any questions about your work or department matters. How can I assist you today?"
+                    logger.info(f"🔧 Hardcoded Fallback Response: Department-specific template response")
             
             # Add to chat history if this is a new conversation
-            chat_exists = any(chat['id'] == chat_id for chat in session['chat_history'])
+            # Ensure chat_id is defined and consistent
+            if 'current_chat_id' not in session or not session['current_chat_id']:
+                session['current_chat_id'] = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{user.id}"
+            chat_id = session['current_chat_id']
+            chat_exists = any(chat['id'] == chat_id for chat in session.get('chat_history', []))
             if not chat_exists:
                 chat_summary = message[:50] + "..." if len(message) > 50 else message
-                session['chat_history'].append({
+                session.setdefault('chat_history', []).append({
                     'id': chat_id,
                     'summary': chat_summary,
                     'timestamp': datetime.now().isoformat(),
@@ -710,7 +791,21 @@ def chat():
                 else:
                     logger.info(f"⚠️ Local search found no relevant documents (threshold: 0.3)")
             
-            # If still no response, use fallbacks
+            # If still no response and no extracted text was already tried, try Gemini without document context
+            if not response and not extracted_text:
+                logger.info(f"🌐 Trying Gemini API fallback for: '{message[:50]}{'...' if len(message) > 50 else ''}'")
+                try:
+                    response = query_gemini(message, user.department, language, "")
+                    if "Hello! I'm your AI assistant" in response or "How can I assist you today" in response:
+                        raise Exception("Got generic response from Gemini")
+                    response_source = "Gemini API"
+                    logger.info(f"🤖 Gemini Response: Generated AI response without document context")
+                    logger.debug(f"Gemini Response length: {len(response)} characters")
+                except Exception as e:
+                    logger.error(f"❌ Gemini API error: {str(e)}")
+                    logger.info(f"⚠️ Gemini failed, trying next fallback...")
+            
+            # If still no response, use difflib fallback
             if not response:
                 logger.info(f"🌐 Trying Gemini API fallback for: '{message[:50]}{'...' if len(message) > 50 else ''}'")
                 # Use Gemini fallback for general questions
@@ -875,6 +970,39 @@ def get_chat_messages(chat_id):
         
     except Exception as e:
         logger.error(f"Error getting session chat messages: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/chat-history/current')
+@login_required
+def get_current_chat_messages():
+    """Get messages for the current session-based chat"""
+    try:
+        chat_id = session.get('current_chat_id')
+        if not chat_id:
+            return jsonify({
+                'success': False,
+                'error': 'No current chat session'
+            }), 404
+        session_messages = session.get('chat_messages', [])
+        message_list = []
+        for msg in session_messages:
+            if msg.get('chat_id') == chat_id:
+                message_list.append({
+                    'id': msg['id'],
+                    'type': msg['type'],
+                    'content': msg['content'],
+                    'timestamp': msg['timestamp'],
+                    'language': msg.get('language', 'en')
+                })
+        return jsonify({
+            'success': True,
+            'messages': message_list
+        })
+    except Exception as e:
+        logger.error(f"Error getting current session chat messages: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)

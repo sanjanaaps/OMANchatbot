@@ -182,23 +182,32 @@ def search_documents(query: str, department: str, top_k: int = 10) -> List[Dict]
         List of search results
     """
     try:
-        db = get_db()
-        
-        # Get documents for the department
-        documents = list(db.documents.find({'department': department}))
-        
+        # Use SQLAlchemy to get documents for the department
+        from app_lib.models import Document
+        documents = Document.query.filter_by(department=department).all()
+
         if not documents:
             return []
-        
+
+        # Convert Document objects to dicts for TFIDFSearch
+        doc_dicts = []
+        for doc in documents:
+            doc_dicts.append({
+                '_id': doc.id,
+                'filename': doc.filename,
+                'content': doc.content,
+                'upload_date': doc.upload_date,
+                'uploaded_by': doc.uploaded_by
+            })
+
         # Build search index
         searcher = TFIDFSearch()
-        searcher.build_index(documents)
-        
+        searcher.build_index(doc_dicts)
+
         # Perform search
         results = searcher.search(query, top_k)
-        
+
         return results
-    
     except Exception as e:
         logger.error(f"Error searching documents: {str(e)}")
         return []
