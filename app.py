@@ -9,7 +9,7 @@ import markdown
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app_lib.db import get_db, init_db
-from app_lib.models import db, User, Document, ChatMessage
+from app_lib.models import db, User, Document, ChatMessage, ChatSession
 from app_lib.auth import login_required, get_current_user, check_password_hash
 # Defer importing heavy document-processing helpers until they're needed
 # (they pull in optional packages like pytesseract, pandas, etc.)
@@ -805,86 +805,109 @@ def chat():
 @app.route('/api/chat-history')
 @login_required
 def get_chat_history():
-    """Get session-based chat history for the current user"""
+    """Get persistent chat sessions for the current user"""
     user = get_current_user()
     try:
-        # Get session-based chat history
-        session_chats = session.get('chat_history', [])
-        
-        logger.info(f"📋 Chat History Request from {user.username} ({user.department}): {len(session_chats)} chats found")
-        
-        chat_summaries = []
-        for chat in session_chats:
-            # Create a summary from the first part of the message
-            summary = chat['content'][:50] + "..." if len(chat['content']) > 50 else chat['content']
-            
-            chat_summaries.append({
-                'id': chat['id'],
-                'summary': summary,
-                'timestamp': chat['timestamp'],
-                'language': chat.get('language', 'en')
-            })
-        
-        logger.debug(f"Returning {len(chat_summaries)} chat summaries")
-        return jsonify({
-            'success': True,
-            'chats': chat_summaries
-        })
-        
+        sessions = ChatSession.query.filter_by(user_id=user.id).order_by(ChatSession.created_at.desc()).all()
+        return jsonify([{
+            'id': s.id,
+            'title': s.title or 'New Chat',
+            'created_at': s.created_at.isoformat() if s.created_at else None
+        } for s in sessions])
     except Exception as e:
-        logger.error(f"❌ Error getting session chat history for {user.username}: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.error(f"Error fetching chat sessions: {e}")
+        return jsonify({'error': 'Failed to fetch chat sessions'}), 500
 
-@app.route('/api/chat-history/<chat_id>')
+@app.route('/api/chat/<int:session_id>')
 @login_required
-def get_chat_messages(chat_id):
-    """Get messages for a specific session-based chat"""
+def api_get_chat_messages(session_id):
+    """Get messages for a specific persistent chat session"""
+    user = get_current_user()
     try:
-        # Get session-based chat history
-        session_chats = session.get('chat_history', [])
-        
-        # Find the specific chat
-        target_chat = None
-        for chat in session_chats:
-            if chat['id'] == chat_id:
-                target_chat = chat
-                break
-        
-        if not target_chat:
-            return jsonify({
-                'success': False,
-                'error': 'Chat not found'
-            }), 404
-        
-        # Get session-based messages for this chat
-        session_messages = session.get('chat_messages', [])
-        message_list = []
-        
-        for msg in session_messages:
-            # Find messages that belong to this chat session
-            if msg.get('chat_id') == chat_id:
-                message_list.append({
-                    'id': msg['id'],
-                    'type': msg['type'],
-                    'content': msg['content'],
-                    'timestamp': msg['timestamp'],
-                    'language': msg.get('language', 'en')
-                })
-        
-        return jsonify({
-            'success': True,
-            'messages': message_list
-        })
-        
+        # Ensure session belongs to user
+        chat_session = ChatSession.query.filter_by(id=session_id, user_id=user.id).first()
+        if not chat_session:
+            return jsonify({'error': 'Chat session not found'}), 404
+        messages = ChatMessage.query.filter_by(session_id=session_id).order_by(ChatMessage.timestamp.asc()).all()
+        return jsonify([{
+            'id': m.id,
+            'sender': m.sender or m.type,
+            'message': m.message or m.content,
+            'timestamp': m.timestamp.isoformat() if m.timestamp else None
+        } for m in messages])
     except Exception as e:
-        logger.error(f"Error getting session chat messages: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
-        }), 500
+        logger.error(f"Error fetching chat messages: {e}")
+        return jsonify({'error': 'Failed to fetch chat messages'}), 500
+
+@app.route('/api/new-session', methods=['POST'])
+@login_required
+def api_new_session():
+    """Create a new chat session"""
+    user = get_current_user()
+    try:
+        title = (request.get_json(silent=True) or {}).get('title')
+        new_session = ChatSession(user_id=user.id, title=title or 'New Chat')
+        db.session.add(new_session)
+        db.session.commit()
+        return jsonify({'id': new_session.id, 'title': new_session.title, 'created_at': new_session.created_at.isoformat()}), 201
+    except Exception as e:
+        logger.error(f"Error creating chat session: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to create chat session'}), 500
+
+@app.route('/api/chat/<int:session_id>/message', methods=['POST'])
+@login_required
+def api_post_message(session_id):
+    """Save user or bot message for a session"""
+    user = get_current_user()
+    try:
+        # Ensure session exists and belongs to user
+        chat_session = ChatSession.query.filter_by(id=session_id, user_id=user.id).first()
+        if not chat_session:
+            return jsonify({'error': 'Chat session not found'}), 404
+        data = request.get_json() or {}
+        sender = data.get('sender', 'user')
+        message_text = data.get('message', '').strip()
+        if not message_text:
+            return jsonify({'error': 'Message is required'}), 400
+        msg = ChatMessage(
+            user_id=user.id,
+            session_id=session_id,
+            sender=sender,
+            message=message_text,
+            type=sender,  # keep compatibility
+            content=message_text,
+            department=user.department,
+            language=data.get('language', 'en')
+        )
+        db.session.add(msg)
+        # If this is the first user message, update session title from its start
+        if not chat_session.title or chat_session.title == 'New Chat':
+            if sender == 'user':
+                chat_session.title = (message_text[:50] + '...') if len(message_text) > 50 else message_text
+        db.session.commit()
+        return jsonify({'id': msg.id}), 201
+    except Exception as e:
+        logger.error(f"Error saving message: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to save message'}), 500
+
+@app.route('/api/chat/<int:session_id>', methods=['DELETE'])
+@login_required
+def api_delete_session(session_id):
+    """Delete a chat session and its messages"""
+    user = get_current_user()
+    try:
+        chat_session = ChatSession.query.filter_by(id=session_id, user_id=user.id).first()
+        if not chat_session:
+            return jsonify({'error': 'Chat session not found'}), 404
+        db.session.delete(chat_session)
+        db.session.commit()
+        return jsonify({'ok': True})
+    except Exception as e:
+        logger.error(f"Error deleting session: {e}")
+        db.session.rollback()
+        return jsonify({'error': 'Failed to delete chat session'}), 500
 
 @app.route('/api/new-chat', methods=['POST'])
 @login_required

@@ -3,11 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Assistant Chat - Central Bank of Oman</title>
+    <title>AI Assistant - Central Bank of Oman</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
+        :root {
+            --cbo-blue: #2B4C9D;
+            --cbo-blue-hover: #234091;
+            --cbo-blue-active: #1a3275;
+        }
+        
         .prose { max-width: 100%; }
         .prose p { margin: 0.5em 0; }
         .prose ul, .prose ol { margin: 0.5em 0; padding-left: 1.5em; }
@@ -15,53 +22,159 @@
         .rtl { direction: rtl; text-align: right; }
         .rtl .prose ul, .rtl .prose ol { padding-right: 1.5em; padding-left: 0; }
         
+        #chatMessages {
+            display: flex;
+            flex-direction: column;
+            min-height: min-content;
+            padding: 1.5rem 2rem;
+            width: 100%;
+        }
+        
+        #chatMessages.has-messages {
+            justify-content: flex-start;
+        }
+        
+        #chatMessages.empty {
+            justify-content: center;
+            min-height: 100%;
+        }
+        
+        #chatMessages > div {
+            width: 100%;
+        }
+        
+        #chatMessages::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        #chatMessages::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        
+        #chatMessages::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        
+        #chatMessages::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        
         .nav-item {
-            transition: all 0.2s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .nav-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+        }
+        
+        .nav-item:hover::before {
+            transform: translateX(0);
         }
         
         .nav-item:hover {
             background-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+        }
+        
+        .nav-item.active {
+            background-color: rgba(255, 255, 255, 0.25);
+        }
+        
+        .view-section {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .view-section.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .card {
+            transition: all 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .upload-zone {
+            transition: all 0.3s ease;
+            border: 2px dashed #cbd5e1;
+        }
+        
+        .upload-zone.drag-over {
+            border-color: var(--cbo-blue);
+            background-color: rgba(43, 76, 157, 0.05);
+            transform: scale(1.02);
         }
     </style>
 </head>
 <body class="bg-gray-50">
-    <!-- Central Bank of Oman Header -->
-    <header class="bg-blue-600 text-white shadow-md">
+    <!-- Header -->
+    <header class="text-white shadow-lg" style="background-color: var(--cbo-blue);">
         <div class="px-6 py-3">
             <div class="flex items-center justify-between">
-                <!-- Logo and Title -->
                 <div class="flex items-center space-x-3">
                     <i class="fas fa-landmark text-2xl"></i>
                     <h1 class="text-xl font-bold">Central Bank of Oman</h1>
                 </div>
                 
-                <!-- Navigation Menu -->
                 <nav class="hidden md:flex items-center space-x-2">
-                    <a href="#dashboard" class="nav-item px-4 py-2 rounded-md flex items-center space-x-2">
+                    <button onclick="navigateTo('dashboard')" class="nav-item px-4 py-2 rounded-md flex items-center space-x-2" data-view="dashboard">
                         <i class="fas fa-tachometer-alt"></i>
                         <span>Dashboard</span>
-                    </a>
-                    <a href="#upload" class="nav-item px-4 py-2 rounded-md flex items-center space-x-2">
+                    </button>
+                    <button onclick="navigateTo('upload')" class="nav-item px-4 py-2 rounded-md flex items-center space-x-2" data-view="upload">
                         <i class="fas fa-cloud-upload-alt"></i>
                         <span>Upload</span>
-                    </a>
-                    <a href="#chat" class="nav-item px-4 py-2 rounded-md flex items-center space-x-2 bg-white bg-opacity-20">
+                    </button>
+                    <button onclick="navigateTo('chat')" class="nav-item px-4 py-2 rounded-md flex items-center space-x-2 active" data-view="chat">
                         <i class="fas fa-comments"></i>
                         <span>Chat</span>
-                    </a>
-                    <a href="#documents" class="nav-item px-4 py-2 rounded-md flex items-center space-x-2">
+                    </button>
+                    <button onclick="navigateTo('documents')" class="nav-item px-4 py-2 rounded-md flex items-center space-x-2" data-view="documents">
                         <i class="fas fa-file-alt"></i>
                         <span>Documents</span>
-                    </a>
+                    </button>
                 </nav>
                 
-                <!-- User Info and Logout -->
                 <div class="flex items-center space-x-4">
                     <div class="flex items-center space-x-2 px-3 py-2 bg-white bg-opacity-10 rounded-md">
                         <i class="fas fa-user-circle"></i>
-                        <span class="text-sm">finance_user (Finance)</span>
+                        <span class="text-sm">finance_user</span>
                     </div>
-                    <button class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-md flex items-center space-x-2 transition-colors">
+                    <button onclick="handleLogout()" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-md flex items-center space-x-2 transition-all duration-300">
                         <i class="fas fa-sign-out-alt"></i>
                         <span>Logout</span>
                     </button>
@@ -71,117 +184,188 @@
     </header>
 
     <div class="flex h-[calc(100vh-60px)] bg-gray-50">
-        <!-- Chat History Sidebar -->
+        <!-- Sidebar -->
         <div id="sidebar" class="w-80 bg-white shadow-lg border-r border-gray-200 flex-col hidden lg:flex">
             <div class="p-4 border-b border-gray-200">
                 <h2 class="text-lg font-semibold text-gray-900 flex items-center">
-                    <i class="fas fa-history text-blue-600 mr-2"></i>
-                    <span data-en="Chat History" data-ar="سجل المحادثات">Chat History</span>
+                    <i class="fas fa-history mr-2" style="color: var(--cbo-blue);"></i>
+                    <span>Chat History</span>
                 </h2>
-                <button id="newChatBtn" class="mt-2 w-full bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors">
+                <button id="newChatBtn" class="mt-2 w-full text-white px-3 py-2 rounded-md text-sm font-medium hover:opacity-90 transition-all duration-300 shadow-md" style="background-color: var(--cbo-blue);">
                     <i class="fas fa-plus mr-2"></i>
-                    <span data-en="New Chat" data-ar="محادثة جديدة">New Chat</span>
+                    <span>New Chat</span>
                 </button>
             </div>
-            <div id="chatHistoryList" class="flex-1 overflow-y-auto p-4 space-y-2">
-                <div class="text-center text-gray-500 py-8">
-                    <i class="fas fa-comments text-2xl mb-2"></i>
-                    <p class="text-sm" data-en="No chat history yet" data-ar="لا يوجد سجل محادثات بعد">No chat history yet</p>
-                </div>
-            </div>
+            <div class="flex-1 overflow-y-auto p-2" id="sessionsList"></div>
         </div>
 
-        <!-- Main Chat Area -->
-        <div class="flex-1 flex flex-col">
-            <!-- Chat Messages -->
-            <div class="flex-1 overflow-y-auto p-6 bg-white">
-                <div id="chatMessages" class="space-y-6 max-w-5xl mx-auto">
-                    <div class="text-center text-gray-500 py-12">
-                        <i class="fas fa-comments text-4xl mb-4 text-gray-400"></i>
-                        <p class="text-lg" data-en="Start a conversation with the AI assistant" data-ar="ابدأ محادثة مع مساعد الذكاء الاصطناعي">Start a conversation with the AI assistant</p>
-                        <p class="text-sm mt-2" data-en="Ask questions or upload documents" data-ar="اطرح الأسئلة أو قم بتحميل المستندات">Ask questions or upload documents</p>
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col overflow-hidden">
+            
+            <!-- DASHBOARD -->
+            <div id="dashboardView" class="view-section hidden flex-1 overflow-y-auto p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h1 class="text-3xl font-bold text-gray-900 mb-8">
+                        <i class="fas fa-tachometer-alt mr-3" style="color: var(--cbo-blue);"></i>
+                        Dashboard
+                    </h1>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <button onclick="navigateTo('upload')" class="card bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-xl shadow-lg">
+                            <i class="fas fa-cloud-upload-alt text-4xl mb-3"></i>
+                            <h3 class="text-xl font-bold mb-2">Upload Document</h3>
+                            <p class="text-blue-100 text-sm">Upload and analyze documents</p>
+                        </button>
+                        
+                        <button onclick="navigateTo('chat')" class="card bg-gradient-to-br from-purple-500 to-purple-600 text-white p-6 rounded-xl shadow-lg">
+                            <i class="fas fa-comments text-4xl mb-3"></i>
+                            <h3 class="text-xl font-bold mb-2">Start Chat</h3>
+                            <p class="text-purple-100 text-sm">Ask questions to AI</p>
+                        </button>
+                        
+                        <button onclick="navigateTo('documents')" class="card bg-gradient-to-br from-green-500 to-green-600 text-white p-6 rounded-xl shadow-lg">
+                            <i class="fas fa-folder-open text-4xl mb-3"></i>
+                            <h3 class="text-xl font-bold mb-2">View Documents</h3>
+                            <p class="text-green-100 text-sm">Browse uploaded files</p>
+                        </button>
                     </div>
                 </div>
             </div>
-
-            <!-- Recording Modal -->
-            <div id="recordingModal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center transition-opacity duration-300">
-                <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl mx-4">
-                    <div class="flex items-center justify-between mb-6">
-                        <div class="flex items-center space-x-3">
-                            <div class="relative">
-                                <i class="fas fa-microphone text-red-600 text-2xl"></i>
-                                <span class="absolute -top-1 -right-1 flex h-3 w-3">
-                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                    <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                                </span>
-                            </div>
-                            <div>
-                                <h3 class="text-xl font-bold text-gray-900" data-en="Listening..." data-ar="الاستماع...">Listening...</h3>
-                                <p class="text-sm text-gray-600" data-en="Speak now" data-ar="تحدث الآن">Speak now</p>
-                            </div>
-                        </div>
-                    </div>
+            
+            <!-- UPLOAD -->
+            <div id="uploadView" class="view-section hidden flex-1 overflow-y-auto p-8">
+                <div class="max-w-4xl mx-auto">
+                    <h1 class="text-3xl font-bold text-gray-900 mb-8">
+                        <i class="fas fa-cloud-upload-alt mr-3" style="color: var(--cbo-blue);"></i>
+                        Upload Documents
+                    </h1>
                     
-                    <div class="bg-gray-50 rounded-xl p-6 mb-6">
-                        <div class="flex items-center justify-center space-x-2">
-                            <div class="w-2 h-8 bg-red-600 rounded animate-pulse" style="animation-delay: 0s"></div>
-                            <div class="w-2 h-12 bg-red-600 rounded animate-pulse" style="animation-delay: 0.1s"></div>
-                            <div class="w-2 h-10 bg-red-600 rounded animate-pulse" style="animation-delay: 0.2s"></div>
-                            <div class="w-2 h-14 bg-red-600 rounded animate-pulse" style="animation-delay: 0.3s"></div>
-                            <div class="w-2 h-8 bg-red-600 rounded animate-pulse" style="animation-delay: 0.4s"></div>
-                        </div>
-                    </div>
-                    
-                    <button type="button" id="stopRecordingBtn" class="w-full inline-flex items-center justify-center px-6 py-4 border border-transparent text-base font-semibold rounded-xl text-white bg-red-600 hover:bg-red-700 transition-all duration-200 shadow-lg">
-                        <i class="fas fa-stop mr-3 text-xl"></i>
-                        <span data-en="Stop Listening" data-ar="إيقاف الاستماع">Stop Listening</span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Chat Input Area -->
-            <div class="bg-white border-t border-gray-200 p-6">
-                <!-- File Upload Display -->
-                <div id="fileUploadArea" class="hidden mb-4 max-w-4xl mx-auto">
-                    <div class="bg-gray-50 border border-gray-300 rounded-lg p-3 flex items-center justify-between">
-                        <div class="flex items-center space-x-3">
-                            <i class="fas fa-file-pdf text-red-500 text-xl"></i>
-                            <span class="text-sm font-medium text-gray-700" id="uploadedFileName">document.pdf</span>
-                        </div>
-                        <button type="button" id="removeFileBtn" class="text-red-500 hover:text-red-700 transition-colors">
-                            <i class="fas fa-times text-lg"></i>
+                    <div id="dropZone" class="upload-zone bg-white rounded-xl shadow-lg p-12 text-center">
+                        <i class="fas fa-cloud-upload-alt text-6xl mb-4" style="color: var(--cbo-blue);"></i>
+                        <h3 class="text-xl font-bold text-gray-900 mb-2">Drop files here or click to browse</h3>
+                        <p class="text-gray-600 mb-6">Supported: PDF, TXT, DOC, DOCX (Max 50MB)</p>
+                        <input type="file" id="bulkFileInput" accept=".pdf,.txt,.doc,.docx" multiple class="hidden">
+                        <button onclick="document.getElementById('bulkFileInput').click()" class="px-6 py-3 text-white rounded-lg font-medium hover:opacity-90 shadow-md" style="background-color: var(--cbo-blue);">
+                            <i class="fas fa-folder-open mr-2"></i>
+                            Choose Files
                         </button>
                     </div>
                 </div>
+            </div>
+            
+            <!-- CHAT -->
+            <div id="chatView" class="view-section active flex flex-col" style="height: 100%;">
+                <div class="flex-1 bg-white overflow-y-auto" style="min-height: 0;">
+                    <div id="chatMessages" class="empty space-y-6">
+                        <div class="text-center text-gray-500 py-12">
+                            <i class="fas fa-comments text-4xl mb-4 text-gray-400"></i>
+                            <p class="text-lg">Start a conversation with the AI assistant</p>
+                            <p class="text-sm mt-2">Ask questions or upload documents</p>
+                        </div>
+                    </div>
+                </div>
 
-                <form id="chatForm" class="max-w-4xl mx-auto">
-                    <div class="flex items-end space-x-3">
-                        <button type="button" id="uploadBtn" class="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm">
-                            <i class="fas fa-paperclip text-lg"></i>
-                        </button>
-                        <input type="file" id="fileInput" accept=".pdf,.txt,.doc,.docx" class="hidden">
-                        
-                        <button type="button" id="recordBtn" class="flex-shrink-0 inline-flex items-center justify-center w-11 h-11 border border-gray-300 text-sm font-medium rounded-lg text-gray-700 bg-white hover:bg-gray-50 hover:border-gray-400 transition-all duration-200 shadow-sm">
-                            <i class="fas fa-microphone text-lg text-red-600"></i>
-                        </button>
-                        
-                        <div class="flex-1 relative">
-                            <textarea id="message" rows="3" class="shadow-sm focus:ring-2 focus:ring-blue-600 focus:border-blue-600 block w-full text-sm border-gray-300 rounded-lg resize-none transition-all duration-200 pr-3 py-3 px-4" placeholder="Ask a question..." required></textarea>
+                <!-- Recording Modal -->
+                <div id="recordingModal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center">
+                    <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-2xl mx-4">
+                        <div class="flex items-center justify-between mb-6">
+                            <div class="flex items-center space-x-3">
+                                <div class="relative">
+                                    <i class="fas fa-microphone text-red-600 text-2xl"></i>
+                                    <span class="absolute -top-1 -right-1 flex h-3 w-3">
+                                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                        <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                                    </span>
+                                </div>
+                                <div>
+                                    <h3 class="text-xl font-bold text-gray-900">Listening...</h3>
+                                    <p class="text-sm text-gray-600">Speak now</p>
+                                </div>
+                            </div>
                         </div>
                         
-                        <div class="flex flex-col space-y-2">
-                            <select id="language" class="block w-24 pl-3 pr-8 py-2.5 text-sm border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 rounded-lg transition-all duration-200 shadow-sm">
-                                <option value="en">EN</option>
-                                <option value="ar">AR</option>
-                            </select>
-                            <button type="submit" class="inline-flex items-center justify-center px-5 py-2.5 border border-transparent text-sm font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 transition-all duration-200 shadow-sm hover:shadow-md">
-                                <i class="fas fa-paper-plane mr-2"></i>
-                                <span data-en="Send" data-ar="إرسال">Send</span>
+                        <div class="bg-gray-50 rounded-xl p-6 mb-6">
+                            <div class="flex items-center justify-center space-x-2">
+                                <div class="w-2 h-8 bg-red-600 rounded animate-pulse"></div>
+                                <div class="w-2 h-12 bg-red-600 rounded animate-pulse" style="animation-delay: 0.1s"></div>
+                                <div class="w-2 h-10 bg-red-600 rounded animate-pulse" style="animation-delay: 0.2s"></div>
+                                <div class="w-2 h-14 bg-red-600 rounded animate-pulse" style="animation-delay: 0.3s"></div>
+                                <div class="w-2 h-8 bg-red-600 rounded animate-pulse" style="animation-delay: 0.4s"></div>
+                            </div>
+                        </div>
+                        
+                        <button id="stopRecordingBtn" class="w-full px-6 py-4 text-white bg-red-600 hover:bg-red-700 rounded-xl font-semibold shadow-lg">
+                            <i class="fas fa-stop mr-3"></i>
+                            Stop Listening
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="bg-white border-t border-gray-200 p-6">
+                    <div id="fileUploadArea" class="hidden mb-4 max-w-4xl mx-auto">
+                        <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-3">
+                                    <i class="fas fa-file-pdf text-red-500 text-2xl"></i>
+                                    <span class="text-sm font-medium text-gray-900" id="uploadedFileName"></span>
+                                </div>
+                                <button id="removeFileBtn" class="text-red-500 hover:text-red-700 p-2">
+                                    <i class="fas fa-times text-lg"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form id="chatForm" class="max-w-4xl mx-auto">
+                        <div class="flex items-end space-x-3">
+                            <button type="button" id="uploadBtn" class="w-11 h-11 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 shadow-sm">
+                                <i class="fas fa-paperclip"></i>
                             </button>
+                            <input type="file" id="fileInput" accept=".pdf,.txt,.doc,.docx" class="hidden">
+                            
+                            <button type="button" id="recordBtn" class="w-11 h-11 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 shadow-sm">
+                                <i class="fas fa-microphone text-red-600"></i>
+                            </button>
+                            
+                            <textarea id="message" rows="3" class="flex-1 border-gray-300 rounded-lg resize-none px-4 py-3" placeholder="Ask a question..." required></textarea>
+                            
+                            <div class="flex flex-col space-y-2">
+                                <select id="language" class="w-24 border-gray-300 rounded-lg py-2.5 text-sm">
+                                    <option value="en">EN</option>
+                                    <option value="ar">AR</option>
+                                </select>
+                                <button type="submit" class="px-5 py-2.5 text-white rounded-lg font-medium hover:opacity-90 shadow-sm" style="background-color: var(--cbo-blue);">
+                                    <i class="fas fa-paper-plane mr-2"></i>
+                                    Send
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- DOCUMENTS -->
+            <div id="documentsView" class="view-section hidden flex-1 overflow-y-auto p-8">
+                <div class="max-w-7xl mx-auto">
+                    <h1 class="text-3xl font-bold text-gray-900 mb-8">
+                        <i class="fas fa-file-alt mr-3" style="color: var(--cbo-blue);"></i>
+                        Documents
+                    </h1>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        <div class="card bg-white rounded-xl shadow-lg p-5">
+                            <div class="flex items-start justify-between mb-3">
+                                <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-red-100">
+                                    <i class="fas fa-file-pdf text-2xl text-red-600"></i>
+                                </div>
+                            </div>
+                            <h3 class="font-semibold text-gray-900 mb-1">Financial Report</h3>
+                            <p class="text-sm text-gray-600 mb-3">2.4 MB • PDF</p>
+                            <button class="text-sm font-medium" style="color: var(--cbo-blue);">View</button>
                         </div>
                     </div>
-                </form>
+                </div>
             </div>
         </div>
     </div>
@@ -189,27 +373,23 @@
     <!-- Footer -->
     <footer class="bg-gray-800 text-white py-3">
         <div class="text-center">
-            <p class="text-sm">© 2024 Oman Central Bank. All rights reserved.</p>
-            <p class="text-xs mt-1 text-gray-400">Department-Secure Document Analyzer & Chatbot</p>
+            <p class="text-sm">© 2024 Central Bank of Oman. All rights reserved.</p>
         </div>
     </footer>
 
     <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    
     (function() {
         'use strict';
         
-        // ========== CONFIGURATION ==========
         const API_KEY = 'AIzaSyBX5T_0LqeeVa6Bu5y7MOAHSKngF547920';
         const API_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
         
-        // ========== STATE ==========
-        let chatHistory = [];
-        let selectedFile = null;
         let pdfContent = '';
         let currentLanguage = 'en';
         let recognition = null;
         
-        // ========== ELEMENTS ==========
         const chatMessages = document.getElementById('chatMessages');
         const chatForm = document.getElementById('chatForm');
         const messageInput = document.getElementById('message');
@@ -224,48 +404,74 @@
         const recordingModal = document.getElementById('recordingModal');
         const stopRecordingBtn = document.getElementById('stopRecordingBtn');
         
-        // ========== LANGUAGE SWITCHING ==========
-        function updateUILanguage(lang) {
-            currentLanguage = lang;
-            
-            document.querySelectorAll('[data-en][data-ar]').forEach(element => {
-                element.textContent = lang === 'ar' ? element.getAttribute('data-ar') : element.getAttribute('data-en');
+        window.navigateTo = function(page) {
+            document.querySelectorAll('.nav-item').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.getAttribute('data-view') === page) {
+                    btn.classList.add('active');
+                }
             });
             
-            if (lang === 'ar') {
-                messageInput.placeholder = 'اطرح سؤالاً...';
-                messageInput.classList.add('rtl');
+            const views = {
+                dashboard: document.getElementById('dashboardView'),
+                upload: document.getElementById('uploadView'),
+                chat: document.getElementById('chatView'),
+                documents: document.getElementById('documentsView')
+            };
+            
+            Object.values(views).forEach(v => {
+                v.classList.remove('active');
+                v.classList.add('hidden');
+            });
+            
+            setTimeout(() => {
+                views[page].classList.remove('hidden');
+                setTimeout(() => views[page].classList.add('active'), 10);
+            }, 100);
+            
+            const sidebar = document.getElementById('sidebar');
+            if (page === 'chat') {
+                sidebar.classList.remove('hidden');
+                sidebar.classList.add('flex');
             } else {
-                messageInput.placeholder = 'Ask a question...';
-                messageInput.classList.remove('rtl');
+                sidebar.classList.add('hidden');
+                sidebar.classList.remove('flex');
             }
-        }
+        };
+        
+        window.handleLogout = function() {
+            if (confirm('Are you sure you want to logout?')) {
+                alert('Logging out...');
+            }
+        };
         
         languageSelect.addEventListener('change', (e) => {
-            updateUILanguage(e.target.value);
+            currentLanguage = e.target.value;
+            messageInput.placeholder = currentLanguage === 'ar' ? 'اطرح سؤالاً...' : 'Ask a question...';
+            messageInput.classList.toggle('rtl', currentLanguage === 'ar');
         });
         
-        // ========== UTILITY FUNCTIONS ==========
         function addMessage(type, content) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = `flex ${type === 'user' ? 'justify-end' : 'justify-start'}`;
+            messageDiv.className = `flex ${type === 'user' ? 'justify-end' : 'justify-start'} fade-in`;
             
             const bubbleDiv = document.createElement('div');
-            bubbleDiv.className = type === 'user' ? 'max-w-[70%]' : 'max-w-[70%]';
+            bubbleDiv.className = 'max-w-[70%]';
             
             if (type === 'assistant') {
                 const labelDiv = document.createElement('div');
                 labelDiv.className = 'flex items-center mb-2 ml-1';
                 labelDiv.innerHTML = `
-                    <i class="fas fa-robot text-blue-600 mr-2"></i>
-                    <span class="text-xs font-medium text-gray-600">${currentLanguage === 'ar' ? 'مساعد الذكاء الاصطناعي' : 'AI Assistant'}</span>
+                    <i class="fas fa-robot mr-2" style="color: var(--cbo-blue);"></i>
+                    <span class="text-xs font-medium text-gray-600">AI Assistant</span>
                 `;
                 bubbleDiv.appendChild(labelDiv);
             }
             
             const contentDiv = document.createElement('div');
             const isRTL = /[\u0600-\u06FF]/.test(content);
-            contentDiv.className = `px-6 py-4 rounded-3xl shadow-md ${type === 'user' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-900'} ${isRTL ? 'rtl' : ''}`;
+            contentDiv.className = `px-6 py-4 rounded-3xl shadow-md ${type === 'user' ? 'text-white' : 'bg-gray-100 text-gray-900'} ${isRTL ? 'rtl' : ''}`;
+            contentDiv.style.backgroundColor = type === 'user' ? 'var(--cbo-blue)' : '';
             contentDiv.innerHTML = `<div class="text-sm prose prose-sm max-w-none ${type === 'user' ? 'prose-invert' : ''}">${marked.parse(content)}</div>`;
             
             bubbleDiv.appendChild(contentDiv);
@@ -274,10 +480,12 @@
             const welcome = chatMessages.querySelector('.text-center');
             if (welcome) {
                 chatMessages.innerHTML = '';
+                chatMessages.classList.remove('empty');
+                chatMessages.classList.add('has-messages');
             }
             
             chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            chatMessages.parentElement.scrollTop = chatMessages.parentElement.scrollHeight;
             
             return messageDiv;
         }
@@ -285,65 +493,138 @@
         async function callAI(prompt) {
             const response = await fetch(`${API_ENDPOINT}?key=${API_KEY}`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    contents: [{
-                        parts: [{
-                            text: prompt
-                        }]
-                    }],
-                    generationConfig: {
-                        temperature: 0.7,
-                        maxOutputTokens: 2048,
-                    }
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
                 })
             });
             
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error?.message || 'API request failed');
-            }
+            if (!response.ok) throw new Error('API request failed');
             
             const data = await response.json();
-            
             if (data.candidates && data.candidates.length > 0) {
                 return data.candidates[0].content.parts[0].text;
-            } else {
-                throw new Error('No response from AI');
             }
+            throw new Error('No response from AI');
         }
         
-        // ========== FILE UPLOAD ==========
-        uploadBtn.addEventListener('click', () => {
-            fileInput.click();
-        });
+        async function extractTextFromPDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let fullText = '';
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                fullText += textContent.items.map(item => item.str).join(' ') + '\n\n';
+            }
+            
+            return fullText.trim();
+        }
+        
+        uploadBtn.addEventListener('click', () => fileInput.click());
         
         fileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
             
-            selectedFile = file;
             uploadedFileName.textContent = file.name;
             fileUploadArea.classList.remove('hidden');
             
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-                const text = event.target.result;
-                pdfContent = text.substring(0, 8000);
-            };
-            reader.readAsText(file);
+            const loadingMsg = addMessage('assistant', 'Loading file...');
+            
+            try {
+                pdfContent = file.type === 'application/pdf' 
+                    ? await extractTextFromPDF(file)
+                    : await file.text();
+                
+                loadingMsg.remove();
+                addMessage('assistant', `File "${file.name}" loaded successfully! You can now ask questions about the document.`);
+            } catch (error) {
+                loadingMsg.remove();
+                addMessage('assistant', `Error reading file: ${error.message}`);
+            }
         });
         
         removeFileBtn.addEventListener('click', () => {
-            selectedFile = null;
             pdfContent = '';
             fileInput.value = '';
             fileUploadArea.classList.add('hidden');
         });
         
-        // ========== CHAT FORM ==========
+        let activeSessionId = null;
+
+        async function refreshSessions() {
+            const list = document.getElementById('sessionsList');
+            list.innerHTML = '';
+            try {
+                const res = await fetch('/api/chat-history');
+                const sessions = await res.json();
+                if (!Array.isArray(sessions) || sessions.length === 0) {
+                    list.innerHTML = `
+                        <div class="text-center text-gray-500 py-8">
+                            <i class="fas fa-comments text-2xl mb-2"></i>
+                            <p class="text-sm">No chat history yet</p>
+                        </div>`;
+                    return;
+                }
+                sessions.forEach(s => {
+                    const item = document.createElement('div');
+                    item.className = 'p-3 rounded-md hover:bg-gray-100 cursor-pointer flex items-center justify-between';
+                    item.innerHTML = `
+                        <div class="truncate" title="${s.title}"><i class="fas fa-message mr-2 text-gray-500"></i>${s.title}</div>
+                        <button class="text-gray-400 hover:text-red-600 p-1" data-delete="${s.id}"><i class="fas fa-trash"></i></button>`;
+                    item.addEventListener('click', (ev) => {
+                        if (ev.target.closest('[data-delete]')) return; // ignore delete button
+                        loadSession(s.id);
+                    });
+                    item.querySelector('[data-delete]')?.addEventListener('click', async (ev) => {
+                        ev.stopPropagation();
+                        if (!confirm('Delete this chat?')) return;
+                        await fetch(`/api/chat/${s.id}`, { method: 'DELETE' });
+                        if (activeSessionId === s.id) {
+                            resetChatWindow();
+                            activeSessionId = null;
+                        }
+                        refreshSessions();
+                    });
+                    list.appendChild(item);
+                });
+            } catch (e) {
+                list.innerHTML = `<div class="text-center text-red-500 py-3 text-sm">Failed to load sessions</div>`;
+            }
+        }
+
+        function resetChatWindow() {
+            chatMessages.innerHTML = `
+                <div class="text-center text-gray-500 py-12">
+                    <i class="fas fa-comments text-4xl mb-4 text-gray-400"></i>
+                    <p class="text-lg">Start a conversation with the AI assistant</p>
+                    <p class="text-sm mt-2">Ask questions or upload documents</p>
+                </div>`;
+            chatMessages.classList.add('empty');
+            chatMessages.classList.remove('has-messages');
+            messageInput.value = '';
+            if (fileUploadArea.classList.contains('hidden') === false) {
+                removeFileBtn.click();
+            }
+        }
+
+        async function loadSession(sessionId) {
+            activeSessionId = sessionId;
+            resetChatWindow();
+            try {
+                const res = await fetch(`/api/chat/${sessionId}`);
+                const msgs = await res.json();
+                if (Array.isArray(msgs)) {
+                    msgs.forEach(m => addMessage(m.sender === 'user' ? 'user' : 'assistant', m.message));
+                }
+            } catch (e) {
+                addMessage('assistant', 'Failed to load messages.');
+            }
+        }
+
         chatForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -353,60 +634,51 @@
             addMessage('user', message);
             messageInput.value = '';
             
-            const typingMsg = currentLanguage === 'ar' ? '💭 جارٍ التفكير...' : '💭 Thinking...';
-            const typingDiv = addMessage('assistant', typingMsg);
+            const typingDiv = addMessage('assistant', 'Thinking...');
             
             try {
-                let prompt = '';
-                
-                if (pdfContent) {
-                    prompt = `You are a helpful AI assistant. Answer the following question based on this document:\n\nDocument:\n${pdfContent}\n\nQuestion: ${message}\n\n`;
-                } else {
-                    prompt = message;
+                // Ensure there is an active session
+                if (!activeSessionId) {
+                    const created = await fetch('/api/new-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: message.slice(0, 50) }) });
+                    const data = await created.json();
+                    activeSessionId = data.id;
+                    await refreshSessions();
                 }
-                
-                if (currentLanguage === 'ar') {
-                    prompt += '\n\nIMPORTANT: Respond in Arabic language only.';
-                }
-                
+                // Save user message
+                await fetch(`/api/chat/${activeSessionId}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sender: 'user', message, language: currentLanguage })
+                });
+                // Call backend chat processing if exists, else keep UI response placeholder
+                let prompt = pdfContent
+                    ? `Answer based on this document:\n\n${pdfContent.substring(0, 15000)}\n\nQuestion: ${message}`
+                    : message;
+                if (currentLanguage === 'ar') { prompt += '\n\nRespond in Arabic.'; }
                 const response = await callAI(prompt);
-                
                 typingDiv.remove();
                 addMessage('assistant', response);
-                
+                // Save assistant message
+                await fetch(`/api/chat/${activeSessionId}/message`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sender: 'assistant', message: response, language: currentLanguage })
+                });
             } catch (error) {
                 typingDiv.remove();
-                const errorMsg = currentLanguage === 'ar' 
-                    ? `❌ خطأ: ${error.message}`
-                    : `❌ Error: ${error.message}`;
-                addMessage('assistant', errorMsg);
+                addMessage('assistant', `Error: ${error.message}`);
             }
         });
         
-        // ========== NEW CHAT ==========
-        newChatBtn.addEventListener('click', () => {
-            chatHistory = [];
+        newChatBtn.addEventListener('click', async () => {
             pdfContent = '';
-            selectedFile = null;
-            
-            const welcomeMsg = currentLanguage === 'ar' 
-                ? `<div class="text-center text-gray-500 py-12">
-                    <i class="fas fa-comments text-4xl mb-4 text-gray-400"></i>
-                    <p class="text-lg">ابدأ محادثة مع مساعد الذكاء الاصطناعي</p>
-                    <p class="text-sm mt-2">اطرح الأسئلة أو قم بتحميل المستندات</p>
-                   </div>`
-                : `<div class="text-center text-gray-500 py-12">
-                    <i class="fas fa-comments text-4xl mb-4 text-gray-400"></i>
-                    <p class="text-lg">Start a conversation with the AI assistant</p>
-                    <p class="text-sm mt-2">Ask questions or upload documents</p>
-                   </div>`;
-            
-            chatMessages.innerHTML = welcomeMsg;
-            messageInput.value = '';
-            if (selectedFile) removeFileBtn.click();
+            const res = await fetch('/api/new-session', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+            const data = await res.json();
+            activeSessionId = data.id;
+            resetChatWindow();
+            refreshSessions();
         });
-        
-        // ========== VOICE RECOGNITION ==========
+          
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
@@ -414,58 +686,42 @@
             recognition.interimResults = false;
             
             recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                messageInput.value = transcript;
+                messageInput.value = event.results[0][0].transcript;
                 recordingModal.classList.add('hidden');
             };
             
-            recognition.onerror = (event) => {
-                console.error('Speech recognition error:', event.error);
+            recognition.onerror = () => {
                 recordingModal.classList.add('hidden');
-                const errorMsg = currentLanguage === 'ar' 
-                    ? 'خطأ في التعرف على الصوت'
-                    : 'Voice recognition error';
-                alert(errorMsg);
+                alert('Voice recognition error');
             };
             
-            recognition.onend = () => {
-                recordingModal.classList.add('hidden');
-            };
+            recognition.onend = () => recordingModal.classList.add('hidden');
         }
         
         recordBtn.addEventListener('click', () => {
             if (!recognition) {
-                const errorMsg = currentLanguage === 'ar' 
-                    ? 'التعرف على الصوت غير مدعوم في هذا المتصفح'
-                    : 'Voice recognition not supported in this browser';
-                alert(errorMsg);
+                alert('Voice recognition not supported');
                 return;
             }
-            
             recognition.lang = currentLanguage === 'ar' ? 'ar-SA' : 'en-US';
             recognition.start();
             recordingModal.classList.remove('hidden');
-            updateUILanguage(currentLanguage);
         });
         
         stopRecordingBtn.addEventListener('click', () => {
-            if (recognition) {
-                recognition.stop();
-            }
+            if (recognition) recognition.stop();
             recordingModal.classList.add('hidden');
         });
         
-        // ========== ENTER KEY ==========
         messageInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 chatForm.dispatchEvent(new Event('submit'));
             }
         });
-        
-        console.log('Central Bank of Oman Chatbot initialized');
-        
+        // Initial load
+        refreshSessions();
     })();
     </script>
 </body>
-</html>
+</html>   

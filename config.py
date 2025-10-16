@@ -12,8 +12,9 @@ class Config:
     SECRET_KEY = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-change-in-production')
     
     # Database Configuration
+    # Prefer DATABASE_URL if provided (12-factor), fallback to legacy POSTGRES_URI
     POSTGRES_URI = os.environ.get('POSTGRES_URI', 'postgresql://postgres:1234@localhost:5432/doc_analyzer')
-    SQLALCHEMY_DATABASE_URI = POSTGRES_URI
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', POSTGRES_URI)
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
     # File Upload Configuration

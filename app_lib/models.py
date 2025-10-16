@@ -87,6 +87,10 @@ class ChatMessage(db.Model):
     
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    # New session-based columns for persistent chat sessions
+    session_id = db.Column(db.Integer, db.ForeignKey('chat_sessions.id'), nullable=True, index=True)
+    sender = db.Column(db.String(50), nullable=True)  # 'user' or 'assistant'
+    message = db.Column(Text, nullable=True)
     type = db.Column(db.String(20), nullable=False)  # 'user' or 'assistant'
     content = db.Column(Text, nullable=False)
     language = db.Column(db.String(5), default='en', nullable=False)
@@ -99,6 +103,7 @@ class ChatMessage(db.Model):
     __table_args__ = (
         Index('idx_chat_messages_user_timestamp', 'user_id', 'timestamp'),
         Index('idx_chat_messages_department_timestamp', 'department', 'timestamp'),
+        Index('idx_chat_messages_session_timestamp', 'session_id', 'timestamp'),
     )
     
     def __repr__(self):
@@ -109,13 +114,28 @@ class ChatMessage(db.Model):
         return {
             'id': self.id,
             'user_id': self.user_id,
+            'session_id': self.session_id,
             'type': self.type,
             'content': self.content,
+            'sender': self.sender or self.type,
+            'message': self.message or self.content,
             'language': self.language,
             'timestamp': self.timestamp.isoformat() if self.timestamp else None,
             'department': self.department,
             'attached_file': self.attached_file
         }
+
+class ChatSession(db.Model):
+    """Chat session representing a conversation thread in the sidebar"""
+    __tablename__ = 'chat_sessions'
+    
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    title = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    
+    # Relationships
+    messages = db.relationship('ChatMessage', backref='session', lazy=True)
 
 def init_database(app):
     """Initialize database with Flask app"""
