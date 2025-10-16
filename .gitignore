@@ -1,4 +1,91 @@
+# Python
 __pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+ENV/
+env/
+venv.bak/
+venv3/
+Include/
+Lib/
+Scripts/
+
+# pip env
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Byte-compiled / optimized / DLL files
+*.pyc
+*.pyo
+*.pyd
+
+# C extensions
+*.dll
+*.dylib
+*.so
+
+# Distribution / packaging
+*.egg
+*.egg-info
+dist/
+build/
+eggs/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+
+# Unit test / coverage reports
+*.cover
+*.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.cache
+.pytest_cache/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Environment variables
+.env
+.config
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Uploads and persistent storage
+uploads/
+*.db
+*.sqlite3
+
+# Site-packages accidentally committed
+app_lib/site-packages/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Visual Studio Code
+.vscode/
+
+# Ignore compiled Python files in this repo
+**/__pycache__/
+**/*.py[cod]__pycache__/
 *.pyc
 venv/
 .env
