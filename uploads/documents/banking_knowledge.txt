@@ -1,7 +1,0 @@
-Central bank operations include monetary policy implementation, currency issuance,
-regulation and supervision of financial institutions, management of payment
-systems, reserve management, and financial stability oversight. Key terms may
-include Basel accords, liquidity coverage ratio, capital adequacy, open market
-operations, repo rate, policy rate corridor, FX reserves, AML/CFT compliance,
-and prudential guidelines specific to the jurisdiction.
-
