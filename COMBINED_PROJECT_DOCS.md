@@ -21,77 +21,39 @@
 ---
 
 ## Logging Enhancements
-
+````markdown
 [See LOGGING_ENHANCEMENTS.md]
 
 ---
 
 ## Hallucination Fixed RAG Readme
 
-[See HALLUCINATION_FIXED_RAG_README.md]
-
 ---
 
-## RAG Integration Readme
-
-[See RAG_INTEGRATION_README.md]
-
----
-
-## Document Ingestion RAG Logging
-
-[See DOCUMENT_INGESTION_RAG_LOGGING.md]
 
 ---
 
 ## RAG System Fix and RAG-Only Mode
-
-[See RAG_SYSTEM_FIX_AND_RAG_ONLY_MODE.md]
-
 ---
 
-## Hallucination Fixed RAG Integration
-
-[See HALLUCINATION_FIXED_RAG_INTEGRATION.md]
 
 ---
-
 ## RAG Configuration
 
-[See RAG_CONFIGURATION.md]
-
----
 
 ## RAG Logging Enhancement
-
-[See RAG_LOGGING_ENHANCEMENT.md]
-
----
-
 ## Whisper Logging Reduction
 
 [See WHISPER_LOGGING_REDUCTION.md]
-
----
 
 ## Session-Based Chat Changes
 
 [See SESSION_BASED_CHAT_CHANGES.md]
 
----
-
 ## Markdown Transcription Changes
 
-[See MARKDOWN_TRANSCRIPTION_CHANGES.md]
-
----
-
-# Full Content
 
 ## RAG Startup Status Fix
-
-````markdown
-# RAG Startup Status Fix
 
 ## Problem
 The startup logs showed "rag=off" even though the application was configured to use RAG, creating confusion about whether RAG was actually available.
@@ -111,27 +73,12 @@ There was an inconsistency between the startup scripts and the main application:
 
 ## Solution
 
-### ✅ **Fixed Environment Variable Integration**
 
 **Before:**
-```python
-# app.py - hardcoded value
-RAG_ENABLED = True  # Enable by default for hallucination-fixed RAG
-```
-
-**After:**
-```python
 # app.py - respects startup script environment variable
 RAG_ENABLED = os.getenv('RAG_ENABLED', '1') == '1'  # Default to enabled if not set
-```
-
-### ✅ **Added Startup Logging**
 
 ```python
-# Log RAG status at startup
-print(f"[App] RAG_ENABLED={RAG_ENABLED} (from env: {os.getenv('RAG_ENABLED', 'not set')})")
-```
-
 ### ✅ **Enhanced RAG Initialization Logging**
 
 ```python
