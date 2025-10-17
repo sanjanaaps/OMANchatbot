@@ -874,6 +874,22 @@ def chat():
     
     # Get session-based messages for this user
     session_messages = session.get('chat_messages', [])
+
+    # Fetch available chat days for user's department from DB to show as tabs
+    try:
+        # Query distinct dates (days) that have chat messages for this department
+        user_department = user.department
+        days_query = (
+            db.session.query(db.func.date(ChatMessage.timestamp).label('day'))
+            .filter(ChatMessage.department == user_department)
+            .group_by('day')
+            .order_by(db.desc('day'))
+        )
+        chat_days = [r.day.isoformat() for r in days_query.all()]
+        logger.info(f"Chat days for department {user_department}: {chat_days}")
+    except Exception as e:
+        logger.error(f"Error fetching chat days for department {user.department}: {e}")
+        chat_days = []
     
     # Convert session messages to the format expected by template
     messages = []
@@ -889,7 +905,7 @@ def chat():
         
         messages.append(SessionMessage(msg))
     
-    return render_template('chat.html', messages=messages)
+    return render_template('chat.html', messages=messages, chat_days=chat_days)
 
 @app.route('/api/chat-history')
 @login_required
@@ -926,6 +942,113 @@ def get_chat_history():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/chat-days')
+@login_required
+def api_chat_days():
+    """Return list of ISO dates (YYYY-MM-DD) that have chat messages for the current user's department."""
+    # get_current_user() may raise RuntimeError if called outside of an application
+    # context during some tests. Try to call it but fall back to session values when
+    # necessary so tests that monkeypatch or set session entries work reliably.
+    try:
+        user = get_current_user()
+    except RuntimeError as e:
+        logger.warning(f"get_current_user() raised RuntimeError: {e}; falling back to session")
+        user = None
+
+    # Prefer department from user object, fall back to session if available
+    user_department = None
+    if user and getattr(user, 'department', None):
+        user_department = user.department
+    else:
+        user_department = session.get('department')
+
+    if not user_department:
+        logger.warning("API: could not determine user department (no user/session). Returning empty days list")
+        return jsonify({'success': True, 'days': []})
+
+    try:
+        days_query = (
+            db.session.query(db.func.date(ChatMessage.timestamp).label('day'))
+            .filter(ChatMessage.department == user_department)
+            .group_by('day')
+            .order_by(db.desc('day'))
+        )
+        days = [r.day.isoformat() for r in days_query.all()]
+        logger.info(f"API: returning {len(days)} chat days for department {user_department}")
+        return jsonify({'success': True, 'days': days})
+    except Exception as e:
+        # Log the username if available, otherwise log user_department
+        uname = getattr(user, 'username', 'unknown') if user else 'unknown'
+        logger.error(f"API: error fetching chat days for {uname} (department={user_department}): {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/chat-day/<day>')
+@login_required
+def api_chat_day_messages(day):
+    """Return messages for a given ISO date (YYYY-MM-DD) filtered by current user's department."""
+    try:
+        user = get_current_user()
+    except RuntimeError as e:
+        logger.warning(f"get_current_user() raised RuntimeError: {e}; falling back to session")
+        user = None
+
+    # Determine department
+    if user and getattr(user, 'department', None):
+        user_department = user.department
+    else:
+        user_department = session.get('department')
+
+    if not user_department:
+        logger.warning(f"API: could not determine department for day {day}; returning empty message list")
+        return jsonify({'success': True, 'messages': []})
+
+    try:
+        # Parse day and build datetime range
+        day_start = datetime.fromisoformat(day)
+        day_end = day_start + timedelta(days=1)
+
+        msgs = (
+            ChatMessage.query
+            .filter(ChatMessage.department == user_department)
+            .filter(ChatMessage.timestamp >= day_start)
+            .filter(ChatMessage.timestamp < day_end)
+            .order_by(ChatMessage.timestamp.asc())
+            .all()
+        )
+
+        result = []
+        for m in msgs:
+            # Normalize user field to a JSON-serializable value.
+            user_field = None
+            try:
+                u = getattr(m, 'user', None)
+                # If the stored user is a string (username), use it. If it's a User object, prefer username then id.
+                if isinstance(u, str):
+                    user_field = u
+                elif u is not None:
+                    user_field = getattr(u, 'username', None) or getattr(u, 'id', None) or str(u)
+            except Exception:
+                user_field = None
+
+            result.append({
+                'id': m.id,
+                # Some ChatMessage models don't have a chat_id field; fall back to message id
+                'chat_id': getattr(m, 'chat_id', m.id),
+                'type': m.type,
+                'content': m.content,
+                'timestamp': m.timestamp.isoformat(),
+                'user': user_field
+            })
+
+        logger.info(f"API: returning {len(result)} messages for {day} (department={user_department})")
+        return jsonify({'success': True, 'messages': result})
+    except Exception as e:
+        uname = getattr(user, 'username', 'unknown') if user else 'unknown'
+        logger.error(f"API: error fetching messages for day {day} for {uname} (department={user_department}): {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/chat-history/<chat_id>')
 @login_required
